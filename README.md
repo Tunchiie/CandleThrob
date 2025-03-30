@@ -46,7 +46,7 @@ And visualizes all of this across multiple dashboards and Python plots.
 
 CandleThrob found that sentiment spikes from Reddit posts **occasionally coincide with price volatility** or shifts in trading volume — but the correlation is relatively weak overall. However, tracking **sudden polarity spikes** proved useful for **alert-based monitoring**.
 
-![Sentiment Spike - AAPL](../images/AAPL Sentiment Spike.png)
+![Sentiment Spike - AAPL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AAPL%20Sentiment%20Spike.png)
 
 ---
 
@@ -79,10 +79,10 @@ Each row represents a **(date, ticker)** pair.
 ### 1. 📈 Sentiment Spike Detection  
 Stocks like NVDA and GOOGL showed frequent polarity spikes.
 
-![Sentiment Spike - NVDA](../images/NVDA Sentiment spike.png)
-![Sentiment Spike - GOOGL](../images/GOOGL Sentiment spike.png)
-![Sentiment Spike - AMZN](../images/AMZN Sentiment Spike.png)
-![Sentiment Spike - MSFT](../images/MSFT sentiment spike.png)
+![Sentiment Spike - NVDA](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/NVDA%20Sentiment%20spike.png)
+![Sentiment Spike - GOOGL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/GOOGL%20Sentiment%20spike.png)
+![Sentiment Spike - AMZN](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AMZN%20Sentiment%20Spike.png)
+![Sentiment Spike - MSFT](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/MSFT%20sentiment%20spike.png)
 
 ---
 
@@ -90,8 +90,7 @@ Stocks like NVDA and GOOGL showed frequent polarity spikes.
 
 Sentiment polarity and daily return showed a weak negative correlation overall.
 
-![Correlation Matrix](../images/Correlation Matrix.png)
-
+![Correlation Matrix](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Correlation%20Matrix.png)
 ---
 
 ### 3. 📉 Most Returns Cluster Around Neutral Sentiment
@@ -115,13 +114,13 @@ AAPL and NVDA's prices moved without consistent Reddit-driven volume spikes.
 
 NVDA had the most sustained positive sentiment over time.
 
-![Sentiment Breakdown](../images/Sentiment Breakdown by stock.png)
+![Sentiment Breakdown](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Sentiment%20Breakdown%20by%20stock.png)
 
 ---
 
 ### 6. 🕰️ Sentiment Polarity Over Time
 
-![Sentiment Over Time](../images/Sentiment polarity over time.png)
+![Sentiment Over Time](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Sentiment%20polarity%20over%20time.png)
 
 ---
 
