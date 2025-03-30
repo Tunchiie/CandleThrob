@@ -1,7 +1,6 @@
 import sqlite3
 import os
 import pandas as pd
-import sys
 
 
 DB_PATH = "../sql/candlethrob.db"
