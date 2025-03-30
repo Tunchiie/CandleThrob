@@ -77,25 +77,51 @@ Each row represents a **(date, ticker)** pair.
 ## 🔍 Insights
 
 ### 1. 📈 Sentiment Spike Detection  
-Stocks like NVDA and GOOGL showed frequent polarity spikes.
+- CandleThrob successfully detected sharp deviations in sentiment polarity, identifying potential “signal moments” across all five tickers.
 
-![Sentiment Spike - NVDA](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/NVDA%20Sentiment%20spike.png)
-![Sentiment Spike - GOOGL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/GOOGL%20Sentiment%20spike.png)
-![Sentiment Spike - AMZN](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AMZN%20Sentiment%20Spike.png)
-![Sentiment Spike - MSFT](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/MSFT%20sentiment%20spike.png)
+  NVDA had the most frequent and volatile sentiment swings, indicating it’s a highly reactive or polarizing stock in Reddit communities.
+
+  ![Sentiment Spike - NVDA](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/NVDA%20Sentiment%20spike.png)
+
+- AAPL and GOOGL both showed clean upward spikes in polarity that corresponded with large clusters of posts. These spikes often preceded small price bumps.
+  
+  ![Sentiment Spike - AAPL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AAPL%20Sentiment%20Spike.png)
+
+  ![Sentiment Spike - GOOGL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/GOOGL%20Sentiment%20spike.png)
+
+- MSFT and AMZN had fewer and more muted spikes, suggesting less Reddit attention or more neutral conversation.
+
+  ![Sentiment Spike - AMZN](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AMZN%20Sentiment%20Spike.png)
+
+  ![Sentiment Spike - MSFT](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/MSFT%20sentiment%20spike.png)
 
 ---
 
 ### 2. 🔁 Weak Correlation Across Metrics
 
-Sentiment polarity and daily return showed a weak negative correlation overall.
+The correlation matrix revealed:
+
+ -  Slight negative correlation (-0.12) between sentiment polarity and daily returns
+
+ -  No meaningful relationship between subjectivity and any financial metric
+
+ -  Very weak correlation between sentiment and volume
+
+This confirms that sentiment alone is not a linear predictor of return — reinforcing the need for combined indicators like signal strength.
 
 ![Correlation Matrix](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Correlation%20Matrix.png)
 ---
 
 ### 3. 📉 Most Returns Cluster Around Neutral Sentiment
+The scatter plot of sentiment polarity vs daily return showed:
 
-![Polarity vs Return](./images/Polarity vs Daily Return by ticker.png)
+ - Most Reddit-driven sentiment hovered between -0.2 and 0.2 polarity
+
+ - Returns clustered around zero, with no obvious pattern favoring positive or negative sentiment
+
+This reinforces the idea that Reddit chatter is frequent, but not always market-moving — especially without large volume or external catalysts.
+
+![Polarity vs Return](https://github.com/Tunchiie/CandleThrob/blob/117b51f392d2ae24685ec24ab8166e1316844b01/images/Polarity%20vs%20Daily%20Return%20by%20ticker.png)
 
 - Most return events occur between polarity scores of -0.2 and 0.2
 - No clear clustering in positive or negative zones
@@ -104,21 +130,45 @@ Sentiment polarity and daily return showed a weak negative correlation overall.
 
 ### 4. 📊 Volume Doesn't Always Match Sentiment Hype
 
-AAPL and NVDA's prices moved without consistent Reddit-driven volume spikes.
+When comparing sentiment data to actual price and volume movements:
 
-![Price and Volume](../images/Price and Volume over Time.png)
+ - NVDA showed price climbs with low or negative sentiment
+
+ - AAPL’s volume increased steadily, regardless of whether sentiment was rising or falling
+
+This suggests that Reddit sentiment does not reliably explain volume surges or price trends, and could benefit from being combined with technical signals or macro triggers.
+
+![Price and Volume](https://github.com/Tunchiie/CandleThrob/blob/117b51f392d2ae24685ec24ab8166e1316844b01/images/Price%20and%20Volume%20over%20Time.png)
 
 ---
 
 ### 5. 🧱 Sentiment Distribution Varies by Stock
 
-NVDA had the most sustained positive sentiment over time.
+The stacked bar chart comparing sentiment types (positive/neutral/negative) across tickers showed:
+
+ - NVDA had the most positive sentiment days and few negatives
+
+ - GOOGL had a high count of neutral mentions, indicating balanced discussions
+
+ - AAPL, MSFT, and AMZN saw more even distributions, making them less predictable from sentiment alone
+
+This breakdown is useful for assessing signal reliability — stocks with highly polarized or positive sentiment might be more reactive to buzz.
 
 ![Sentiment Breakdown](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Sentiment%20Breakdown%20by%20stock.png)
 
 ---
 
 ### 6. 🕰️ Sentiment Polarity Over Time
+
+Plotting all ticker sentiments over time shows that:
+
+ - Reddit’s attention rotates, with different stocks peaking in polarity at different moments
+
+ - NVDA and GOOGL showed more volatility in sentiment polarity over time
+
+ - MSFT and AMZN remained relatively neutral
+
+This confirms the non-stationary nature of retail sentiment, and supports building ticker-specific thresholds rather than using one-size-fits-all logic.
 
 ![Sentiment Over Time](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Sentiment%20polarity%20over%20time.png)
 
