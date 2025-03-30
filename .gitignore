@@ -1,0 +1,39 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# VSCode settings
+.vscode/
+
+# SQLite database
+sql/candlethrob.db
+
+# Environment variables & secrets
+*.env
+*.env.*
+var.env
+
+# CSV/data exports (optional, depends on what you want versioned)
+data/*.csv
+!data/sample.csv  # (you can force-include samples if needed)
+
+# Logs or temporary outputs
+*.log
+*.tmp
+outputs/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Jupyter notebook metadata (optional, but helps sometimes)
+notebooks/candlethrob_dataset.csv
