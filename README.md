@@ -46,7 +46,7 @@ And visualizes all of this across multiple dashboards and Python plots.
 
 CandleThrob found that sentiment spikes from Reddit posts **occasionally coincide with price volatility** or shifts in trading volume — but the correlation is relatively weak overall. However, tracking **sudden polarity spikes** proved useful for **alert-based monitoring**.
 
-![Sentiment Spike - AAPL](./images/AAPL Sentiment Spike.png)
+![Sentiment Spike - AAPL](../images/AAPL Sentiment Spike.png)
 
 ---
 
@@ -79,10 +79,10 @@ Each row represents a **(date, ticker)** pair.
 ### 1. 📈 Sentiment Spike Detection  
 Stocks like NVDA and GOOGL showed frequent polarity spikes.
 
-![Sentiment Spike - NVDA](./images/NVDA Sentiment spike.png)
-![Sentiment Spike - GOOGL](./images/GOOGL Sentiment spike.png)
-![Sentiment Spike - AMZN](./images/AMZN Sentiment Spike.png)
-![Sentiment Spike - MSFT](./images/MSFT sentiment spike.png)
+![Sentiment Spike - NVDA](../images/NVDA Sentiment spike.png)
+![Sentiment Spike - GOOGL](../images/GOOGL Sentiment spike.png)
+![Sentiment Spike - AMZN](../images/AMZN Sentiment Spike.png)
+![Sentiment Spike - MSFT](../images/MSFT sentiment spike.png)
 
 ---
 
@@ -90,7 +90,7 @@ Stocks like NVDA and GOOGL showed frequent polarity spikes.
 
 Sentiment polarity and daily return showed a weak negative correlation overall.
 
-![Correlation Matrix](./images/Correlation Matrix.png)
+![Correlation Matrix](../images/Correlation Matrix.png)
 
 ---
 
@@ -107,7 +107,7 @@ Sentiment polarity and daily return showed a weak negative correlation overall.
 
 AAPL and NVDA's prices moved without consistent Reddit-driven volume spikes.
 
-![Price and Volume](./images/Price and Volume over Time.png)
+![Price and Volume](../images/Price and Volume over Time.png)
 
 ---
 
@@ -115,13 +115,13 @@ AAPL and NVDA's prices moved without consistent Reddit-driven volume spikes.
 
 NVDA had the most sustained positive sentiment over time.
 
-![Sentiment Breakdown](./images/Sentiment Breakdown by stock.png)
+![Sentiment Breakdown](../images/Sentiment Breakdown by stock.png)
 
 ---
 
 ### 6. 🕰️ Sentiment Polarity Over Time
 
-![Sentiment Over Time](./images/Sentiment polarity over time.png)
+![Sentiment Over Time](../images/Sentiment polarity over time.png)
 
 ---
 
