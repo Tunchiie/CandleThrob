@@ -56,5 +56,5 @@ for ticker in tickers:
 
 
 reddit_df = pd.DataFrame(posts)
+reddit_df["date"] = pd.to_datetime(reddit_df["date"]).dt.date
 insert_dataframe(reddit_df, "sentiment_scores")
-print("✅ Reddit sentiment data inserted into the database.")
