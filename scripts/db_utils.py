@@ -1,8 +1,10 @@
 import sqlite3
 import os
 import pandas as pd
+import sys
 
-DB_PATH = "c:/Users/tunchiie/Documents/Data Projects/CandleThrob/sql/candlethrob.db"
+
+DB_PATH = "../sql/candlethrob.db"
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 

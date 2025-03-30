@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # loading variables from .env file
-path = "c:/Users/tunchiie/Documents/Data Projects/CandleThrob/"
+path = "../CandleThrob/"
 
 load_dotenv(path + "data/var.env")
 
@@ -57,5 +57,4 @@ for ticker in tickers:
 
 reddit_df = pd.DataFrame(posts)
 insert_dataframe(reddit_df, "sentiment_scores")
-
-reddit_df.head()
+print("✅ Reddit sentiment data inserted into the database.")
