@@ -8,7 +8,6 @@ DB_PATH = "../sql/candlethrob.db"
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 
-# Ensure the directory exists
 def connect_db():
     """Creates a new SQLite connection."""
     return sqlite3.connect(DB_PATH, timeout=10)

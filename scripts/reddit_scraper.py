@@ -9,7 +9,6 @@ from textblob import TextBlob
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-# loading variables from .env file
 path = "../CandleThrob/"
 
 load_dotenv(path + "data/var.env")
@@ -34,9 +33,7 @@ reddit = praw.Reddit(
 posts = []
 
 
-# Fetch posts from Reddit for each ticker
 for ticker in tickers:
-    # Search for posts related to the stock ticker on Reddit
     for submission in reddit.subreddit("wallstreetbets").search(ticker, limit=300):
         text = submission.title + " " + submission.selftext
         blob = TextBlob(text)
