@@ -2,15 +2,22 @@
 
 ---
 
-## Background and 
+##  Data Structure & Preprocessing
 
-Platforms like Reddit have evolved into real-time trading sentiment hubs that influence stock trajectory. Posts and comment sentiment can preemptively signal market behavior — yet most trading strategies ignore this soft data and focus on stock patterns. This project analyzes Reddit sentiment for selected stocks, combines it with historical market data, and generates signal scores, visual alerts, and behavioral patterns.
+- Raw Reddit data is collected per stock using PRAW (title + text + timestamp)
+- Sentiment is scored using `TextBlob` (polarity & subjectivity)
+- Market data includes: `close price`, `volume`, `daily return`
+- Calculated columns:
+  - `avg_sentiment`, `total_mentions`, `signal_strength = avg_sentiment * total_mentions`
+  - `daily_return = (price_t - price_t-1) / price_t-1`
+
+Each row represents a **(date, ticker)** pair.
 
 ---
 
-## Project Overview
+## Background and Overview
 
-CandleThrob scrapes Reddit data for sentiment, merges it with stock price and volume data, and visualizes spikes, correlations, and behavioral insight.
+Platforms like Reddit have evolved into real-time trading sentiment hubs that influence stock trajectory. Posts and comment sentiment can preemptively signal market behavior — yet most trading strategies ignore this soft data and focus on stock patterns. This project analyzes Reddit sentiment for selected stocks, combines it with historical market data, and generates signal scores, visual alerts, and behavioral patterns.
 
 It calculates:
 - **Sentiment Polarity & Subjectivity**
@@ -27,21 +34,7 @@ CandleThrob found that sentiment spikes from Reddit posts **occasionally coincid
 
 ![Sentiment Spike - AAPL](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/AAPL%20Sentiment%20Spike.png)
 
----
-
-##  Data Structure & Preprocessing
-
-- Raw Reddit data is collected per stock using PRAW (title + text + timestamp)
-- Sentiment is scored using `TextBlob` (polarity & subjectivity)
-- Market data includes: `close price`, `volume`, `daily return`
-- Calculated columns:
-  - `avg_sentiment`, `total_mentions`, `signal_strength = avg_sentiment * total_mentions`
-  - `daily_return = (price_t - price_t-1) / price_t-1`
-
-Each row represents a **(date, ticker)** pair.
-
----
-
+--- 
 ##  Evaluation Metrics
 
 - **Sentiment Polarity** → Range: [-1, 1]
@@ -56,7 +49,7 @@ Each row represents a **(date, ticker)** pair.
 ##  Insights
 
 ### 1.  Sentiment Spike Detection  
-- CandleThrob successfully detected sharp deviations in sentiment polarity, identifying potential “signal moments” across all five tickers.
+- CandleThrob successfully detected sharp deviations in sentiment polarity, identifying potential “signal triggers” across all five tickers.
 
   NVDA had the most frequent and volatile sentiment swings, indicating it’s a highly reactive or polarizing stock in Reddit communities.
 
@@ -169,18 +162,11 @@ This confirms the non-stationary nature of retail sentiment, and supports buildi
 
 ---
 
-## Future Work
-
-- Integrate Twitter sentiment
+## Recommendations
 - Use VADER or fine-tuned BERT models for sentiment
 - Backtest signal spikes against next-day returns
 - Build web interface with alerts
 - Introduce real-time tracking & update cycles
-
----
-
-## Additional Enhancements
-
 - Dynamic threshold control for spike alerts
 - Smoother signal strength (EMA or Bollinger Bands)
 - Weight sentiment by upvotes/karma
