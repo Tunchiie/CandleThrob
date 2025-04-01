@@ -1,10 +1,3 @@
--- This SQL script contains various queries to analyze stock prices and sentiment scores.
--- 1. Get the average stock price and sentiment scores for each stock
--- 2. Get the average sentiment scores for each stock
--- 3. Get the average sentiment scores for each stock by date
--- 4. Get the average sentiment scores for each stock by date and ticker
--- 5. Get the average sentiment scores for each stock by date and ticker, and join with stock prices
--- 6. Get the all-time most mentioned tickers
 -- Average stock price and sentiment scores for each stock
 SELECT 
   s.ticker,
