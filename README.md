@@ -2,19 +2,6 @@
 
 ---
 
-##  Data Structure & Preprocessing
-
-- Raw Reddit data is collected per stock using PRAW (title + text + timestamp)
-- Sentiment is scored using `TextBlob` (polarity & subjectivity)
-- Market data includes: `close price`, `volume`, `daily return`
-- Calculated columns:
-  - `avg_sentiment`, `total_mentions`, `signal_strength = avg_sentiment * total_mentions`
-  - `daily_return = (price_t - price_t-1) / price_t-1`
-
-Each row represents a **(date, ticker)** pair.
-
----
-
 ## Background and Overview
 
 Platforms like Reddit have evolved into real-time trading sentiment hubs that influence stock trajectory. Posts and comment sentiment can preemptively signal market behavior — yet most trading strategies ignore this soft data and focus on stock patterns. This project analyzes Reddit sentiment for selected stocks, combines it with historical market data, and generates signal scores, visual alerts, and behavioral patterns.
@@ -25,6 +12,19 @@ It calculates:
 - **Custom Signal Strength**
 - **Spike alerts**  
 And visualizes all of this across multiple dashboards and Python plots.
+
+---
+
+##  Data Structure & Preprocessing
+
+- Raw Reddit data is collected per stock using PRAW (title + text + timestamp)
+- Sentiment is scored using `TextBlob` (polarity & subjectivity)
+- Market data includes: `close price`, `volume`, `daily return`
+- Calculated columns:
+  - `avg_sentiment`, `total_mentions`, `signal_strength = avg_sentiment * total_mentions`
+  - `daily_return = (price_t - price_t-1) / price_t-1`
+
+Each row represents a **(date, ticker)** pair.
 
 ---
 
