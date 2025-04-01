@@ -1,23 +1,14 @@
-# 🕯️ CandleThrob – Market Sentiment Signal Analysis
+# CandleThrob – Market Sentiment Signal Analysis
 
 ---
 
-## Problem Statement
+## Background and 
 
-Retail sentiment is increasingly influential in short-term stock movement. However, there's no clear, visual way to monitor sentiment spikes, trading behavior, and pricing shifts across multiple stocks using social media signals.  
-**CandleThrob** aims to close that gap.
-
----
-
-## Background
-
-Platforms like Reddit have evolved into real-time trading sentiment hubs. Posts and comment sentiment can preemptively signal market behavior — yet most trading strategies ignore this soft data.
-
-This project analyzes Reddit sentiment for selected stocks, combines it with historical market data, and generates signal scores, visual alerts, and behavioral patterns.
+Platforms like Reddit have evolved into real-time trading sentiment hubs that influence stock trajectory. Posts and comment sentiment can preemptively signal market behavior — yet most trading strategies ignore this soft data and focus on stock patterns. This project analyzes Reddit sentiment for selected stocks, combines it with historical market data, and generates signal scores, visual alerts, and behavioral patterns.
 
 ---
 
-## 🔍 Project Overview
+## Project Overview
 
 CandleThrob scrapes Reddit data for sentiment, merges it with stock price and volume data, and visualizes spikes, correlations, and behavioral insight.
 
