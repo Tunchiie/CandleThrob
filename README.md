@@ -142,7 +142,7 @@ Plotting all ticker sentiments over time shows that:
 
 This confirms the non-stationary nature of retail sentiment, and supports building ticker-specific thresholds rather than using one-size-fits-all logic.
 
-![Sentiment Over Time](https://github.com/Tunchiie/CandleThrob/blob/14a63037bf7fee2d3a5f9f25671ed98cbb70659e/images/Sentiment%20polarity%20over%20time.png)
+![Sentiment Over Time](https://github.com/Tunchiie/CandleThrob/blob/41548ab43abd7ba0074fbda9bc70c6d09d7b49cc/images/Sentiment%20polarity%20over%20time.png)
 
 ---
 
