@@ -170,4 +170,4 @@ This confirms the non-stationary nature of retail sentiment, and supports buildi
 - Dynamic threshold control for spike alerts
 - Smoother signal strength (EMA or Bollinger Bands)
 - Weight sentiment by upvotes/karma
-- Add volatility as a secondary signal layer
+- Add volatility as a secondary signal layer.
