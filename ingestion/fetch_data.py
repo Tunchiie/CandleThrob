@@ -1,11 +1,12 @@
 import yfinance as yf
 import pandas_datareader as pdr
 import pandas as pd
-from fredapi import fred
+from fredapi import Fred
 import re
 from datetime import date
 from tqdm import tqdm
 import os
+import time
 
 class DataIngestion:
 
@@ -22,6 +23,7 @@ class DataIngestion:
         self.end_date = date.today()
         self.start_date = date(year=self.end_date.year-50, month=self.end_date.month, day=self.end_date.day)
         self.ticker_df = None
+        self.fetch()
     
     def fetch(self):
         """ Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
@@ -49,9 +51,9 @@ class DataIngestion:
         """
 
         # Download stock data from yfinance
-        for ticker in tqdm(self.all_tickers, desc="Downloading"):
-
-            price_history = yf.download(tickers=ticker, start=self.start_date, interval="1d")
+        tq = tqdm(self.all_tickers, desc="Downloading")
+        for i, ticker in enumerate(tq):
+            price_history = yf.download(tickers=ticker, start=self.start_date, end=self.end_date, interval="1d")
 
             if price_history.empty:
                 continue
@@ -62,10 +64,11 @@ class DataIngestion:
             price_history["Weekday"] = price_history.index.weekday
             price_history["Date"] = price_history.index.date
 
-            if self.ticker_df:
+            if self.ticker_df is not None and not self.ticker_df.empty:
                 self.ticker_df = pd.concat([self.ticker_df, price_history])
             else:
                 self.ticker_df = price_history
+            time.sleep(1)  # To avoid hitting the API rate limit
         self.ticker_df.reset_index(inplace=True)
         self.ticker_df.rename(columns={"index": "Date"}, inplace=True)
         self.ticker_df = self.ticker_df[["Date", "Ticker", "Open", "High", "Low", "Close", "Adj Close", "Volume", "Year", "Month", "Weekday"]]
@@ -82,6 +85,7 @@ class DataIngestion:
         """
         # Fetch market cap, sector, and industry data from yfinance
         ticker_info = yf.Tickers(self.all_tickers).tickers
+        
         for ticker in tqdm(ticker_info, desc="Enriching Data"):
             info = ticker_info[ticker].info
             if 'marketCap' in info:
@@ -103,8 +107,11 @@ class DataIngestion:
         It stores the data in a DataFrame and merges it with the ticker DataFrame based on the date.
         Returns:
             None: The method updates the ticker DataFrame in place with additional columns for economic indicators.
+        Raises:
+            Exception: If the FRED API key is not set in the environment variables.
         """
-        fred_api = fred(os.getenv("FRED_API_KEY"))
+
+        fred_api = Fred(os.getenv("FRED_API_KEY"))
 
         fred_series = [
                             "FEDFUNDS",     # Federal Funds Rate
@@ -136,5 +143,13 @@ class DataIngestion:
         Returns:
             None: The method saves the ticker DataFrame to a CSV file at the specified path.
         """
-        self.ticker_df.to_csv("storage/ticker_data.csv")
-        print(f"Data saved to storage/ticker_data.csv")
+        self.ticker_df.to_csv("./storage/ticker_data.csv")
+        print(f"Data saved to ./storage/ticker_data.csv")
+
+# At the bottom of fetch_data.py (for testing or CLI usage)
+if __name__ == "__main__":
+
+    ingestion = DataIngestion()
+    
+    ingestion.fetch()
+    ingestion.save_data()
