@@ -121,16 +121,14 @@ class DataIngestion:
         ]
         fred_data = {series: fred_api.get_series(series, start_date=self.start_date, end_date=self.end_date) for series in fred_series}
         fred_df = pd.DataFrame(fred_data)
-        for i in [1,3,7,30,90,365]:
-            fred_df[f"Return_{i}d"] = fred_df.groupby("Ticker")["Adj Close"].pct_change(periods=i).fillna(0)
+       
         fred_df.reset_index(inplace=True)
         fred_df.rename(columns={"index": "Date"}, inplace=True)
         fred_df["Date"] = pd.to_datetime(fred_df["Date"])
         fred_df.set_index("Date", inplace=True)
         fred_df.sort_index(inplace=True)
         self.ticker_df = self.ticker_df.merge(fred_df, on="Date", how="left")
-        self.ticker_df.fillna(method='ffill', inplace=True)
-        self.ticker_df.fillna(method='bfill', inplace=True)
+        self.ticker_df[fred_df.columns] = self.ticker_df[fred_df.columns].ffill().bfill()
         self.ticker_df = self.ticker_df.sort_index()
     
     def save_data(self):
