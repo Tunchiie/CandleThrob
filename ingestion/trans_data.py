@@ -8,21 +8,26 @@ from ingestion.fetch_data import DataIngestion
 import logging
 from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    filename="debug.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-class TechnicalIndicators(DataIngestion):
+class TechnicalIndicators():
     """
     A class to calculate technical indicators for stock data.
-
+    This class uses TA-Lib to compute various indicators such as momentum, volume, pattern, volatility, price, cyclical, and statistical indicators.
+    It also merges macroeconomic indicators from FRED into the stock data DataFrame.
     Attributes:
-        ticker_df (pd.DataFrame): DataFrame containing stock data with columns like 'Open', 'High', 'Low', 'Close', etc.
+        ticker_df (pd.DataFrame): DataFrame containing stock data with columns like 'Open', 'High', 'Low', 'Close', 'Volume', and 'Ticker'.
+        macro_df (pd.DataFrame): DataFrame containing macroeconomic indicators.
     """
 
     def __init__(self, ticker_df: pd.DataFrame, macro_df: pd.DataFrame):
-        super().__init__(ticker_df)
-        self.ticker_df = ticker_df
-        self.macro_df = macro_df
+        self.ticker_df = ticker_df[ticker_df["Date"].dt.year >= 2000].copy()
+        self.macro_df = macro_df[macro_df["Date"].dt.year >= 2000].copy()
 
     def calculate_technical_indicators(self):
         """
@@ -53,6 +58,7 @@ class TechnicalIndicators(DataIngestion):
         
         
         self.ticker_df["Volume"] = self.ticker_df["Volume"]*1.0
+        self.ticker_df["Date"] = pd.to_datetime(self.ticker_df["Date"], utc=True)
         
         for key in ['Open', 'High', 'Low', 'Close', 'Volume']:
             self.ticker_df.loc[:,key] = self.ticker_df[key].astype('double')
@@ -79,14 +85,28 @@ class TechnicalIndicators(DataIngestion):
             df_current_ticker_price_indicators["Date"] = pd.to_datetime(df_current_ticker_price_indicators["Date"], utc=True)
             df_current_ticker_cyclical_indicators["Date"] = pd.to_datetime(df_current_ticker_cyclical_indicators["Date"], utc=True)
             df_current_ticker_statistical_indicators["Date"] = pd.to_datetime(df_current_ticker_statistical_indicators["Date"], utc=True)
-            
-            
+
             current_ticker_df = current_ticker_df.merge(df_current_ticker_momentum_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
             current_ticker_df = current_ticker_df.merge(df_current_ticker_volume_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
             current_ticker_df = current_ticker_df.merge(df_current_ticker_pattern_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
             current_ticker_df = current_ticker_df.merge(df_current_ticker_volatility_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
             current_ticker_df = current_ticker_df.merge(df_current_ticker_price_indicators, on=['Date', 'Ticker'], how='left') 
-            self.ticker_df.update(current_ticker_df)
+            print(f"Processing ticker: {ticker}")
+            current_ticker_df = current_f.ticker_df.merge(df_current_ticker_cyclical_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
+            current_ticker_df = current_ticker_df.merge(df_current_ticker_statistical_indicators, on=['Date', 'Ticker'], how='left')
+            print(f"Processing ticker: {ticker}")
+            current_ticker_df = current_ticker_df.fillna(0)
+            
+            self.ticker_df = self.ticker_df.merge(current_ticker_df, on=['Date', 'Ticker'], how='outer')
+            print(f"Processing ticker: {ticker}")
+            print(self.ticker_df.head(5))
+            self.ticker_df.to_csv("storage/indicators.csv", index=False)
+            
         
     
     def get_talib_momentum_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -114,14 +134,24 @@ class TechnicalIndicators(DataIngestion):
         momentum_adx = talib.ADX(df['High'], df['Low'], df['Close'], timeperiod=14)
         momentum_roc = talib.ROC(df['Close'], timeperiod=10)
         momentum_mom = talib.MOM(df['Close'], timeperiod=10)
-        momentum_macd_oscillator = talib.MACDEXT(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9, fastmatype=0, slowmatype=0, signalmatype=0)
         momentum_trix = talib.TRIX(df['Close'], timeperiod=30)
         momentum_willr = talib.WILLR(df['High'], df['Low'], df['Close'], timeperiod=14)
-        momentum_mmacdfix = talib.MACDFIX(df['Close'], fastperiod=12, slowperiod=26, signalperiod=9)
-                
+        momentum_sma10 = talib.SMA(df['Close'], timeperiod=10)
+        momentum_sma20 = talib.SMA(df['Close'], timeperiod=20)
+        momentum_sma50 = talib.SMA(df['Close'], timeperiod=50)
+        momentum_sma100 = talib.SMA(df['Close'], timeperiod=100)
+        momentum_sma200 = talib.SMA(df['Close'], timeperiod=200)
+        momentum_ema10 = talib.EMA(df['Close'], timeperiod=10)
+        momentum_ema20 = talib.EMA(df['Close'], timeperiod=20)  
+        momentum_ema50 = talib.EMA(df['Close'], timeperiod=50)
+        momentum_ema100 = talib.EMA(df['Close'], timeperiod=100)
+        momentum_ema200 = talib.EMA(df['Close'], timeperiod=200)
+        
+
         momentum_df = pd.DataFrame({
             'Date': df['Date'],
             'Ticker': df['Ticker'],
+            'ADX': momentum_adx,
             'RSI': momentum_rsi,
             'MACD': momentum_macd,
             'MACD_Signal': momentum_macdsignal,
@@ -131,18 +161,30 @@ class TechnicalIndicators(DataIngestion):
             'CCI': momentum_cci,
             'ROC': momentum_roc,
             'MOM': momentum_mom,
-            'MACD_Oscillator': momentum_macd_oscillator,
             'TRIX': momentum_trix,
             'WILLR': momentum_willr,
-            'MMACDFix': momentum_mmacdfix
+            "SMA10": momentum_sma10,
+            "SMA20": momentum_sma20,
+            "SMA50": momentum_sma50,
+            "SMA100": momentum_sma100,
+            "SMA200": momentum_sma200,
+            "EMA10": momentum_ema10,
+            "EMA20": momentum_ema20,
+            "EMA50": momentum_ema50,
+            "EMA100": momentum_ema100,
+            "EMA200": momentum_ema200
         })
         momentum_df = momentum_df.astype({'RSI': 'double', 'MACD': 'double', 'MACD_Signal': 'double',
                                            'MACD_Hist': 'double', 'Stoch_K': 'double', 
                                            'Stoch_D': 'double', 'CCI': 'double',
                                              'ADX': 'double', 'ROC': 'double',
-                                             'MOM': 'double', 'MACD_Oscillator': 'double',
-                                             'TRIX': 'double', 'WILLR': 'double',
-                                                'MMACDFix': 'double'})
+                                             'MOM': 'double', 'TRIX': 'double',
+                                             'WILLR': 'double', 'SMA10': 'double',
+                                             'SMA20': 'double', 'SMA50': 'double',
+                                             'SMA100': 'double', 'SMA200': 'double',
+                                             'EMA10': 'double', 'EMA20': 'double',
+                                             'EMA50': 'double', 'EMA100': 'double',
+                                             'EMA200': 'double'})
         momentum_df['Date'] = pd.to_datetime(momentum_df['Date'], utc=True)
         logger.info("TA-Lib indicators calculated successfully.")
         return momentum_df
@@ -166,7 +208,7 @@ class TechnicalIndicators(DataIngestion):
         volume_ad = talib.AD(df['High'], df['Low'], df['Close'], df['Volume'])
         volume_mfi = talib.MFI(df['High'], df['Low'], df['Close'], df['Volume'], timeperiod=14)
         volume_adosc = talib.ADOSC(df['High'], df['Low'], df['Close'], df['Volume'], fastperiod=3, slowperiod=10)
-        volume_cmf = talib.CMF(df['High'], df['Low'], df['Close'], df['Volume'], timeperiod=20)
+        volume_cmf = self.chaikin_money_flow(df, period=20)
         volume_vwap = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
         volume_vwap = volume_vwap.fillna(0)
         volume_vwap = volume_vwap.astype('double')
@@ -195,6 +237,27 @@ class TechnicalIndicators(DataIngestion):
         logger.info("Volume indicators calculated successfully.")
         return volume_df
     
+    def chaikin_money_flow(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
+        """
+        Calculate Chaikin Money Flow (CMF) indicator.
+        Args:
+            df (pd.DataFrame): DataFrame containing stock data with columns 'High', 'Low', 'Close', 'Volume'.
+            period (int): Period for the CMF calculation.
+        Returns:
+            pd.Series: Series with CMF values.
+        """
+        if df.empty:
+            logger.warning("Input DataFrame is empty. Returning an empty Series.")
+            return pd.Series(dtype=float)
+
+        logger.info("Calculating Chaikin Money Flow (CMF) indicator...")
+        
+        ad = talib.AD(df['High'], df['Low'], df['Close'], df['Volume'])
+        cmf = ad.rolling(window=period).sum() / df['Volume'].rolling(window=period).sum()
+        
+        logger.info("Chaikin Money Flow (CMF) indicator calculated successfully.")
+        return cmf
+    
     def donchian_channel(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
         """
         Calculate Donchian Channel indicators.
@@ -215,7 +278,27 @@ class TechnicalIndicators(DataIngestion):
         
 
         logger.info("Donchian Channel indicators calculated successfully.")
-        return donchian_upper, donch_lower
+        return donch_upper, donch_lower
+    
+    def ulcer_index(self, close: pd.Series, period: int = 14) -> pd.Series:
+        """
+        Calculate Ulcer Index.
+        Args:
+            close (pd.Series): Series of closing prices.
+            period (int): Period for the Ulcer Index calculation.
+        Returns:
+            pd.Series: Series with Ulcer Index values.
+        """
+        if close.empty:
+            logger.warning("Input Series is empty. Returning an empty Series.")
+            return pd.Series(dtype=float)
+
+        logger.info("Calculating Ulcer Index...")
+        
+        ulcer_index = ((close.rolling(window=period).max() - close) / close.rolling(window=period).max()) ** 2
+        
+        logger.info("Ulcer Index calculated successfully.")
+        return ulcer_index
     
     
     def get_talib_volatility_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -231,17 +314,13 @@ class TechnicalIndicators(DataIngestion):
             return pd.DataFrame(columns=['Date', 'Ticker', 'ATR', 'NATR', 'TRANGE'])
         
         logger.info("Calculating volatility indicators...")
-            
+
+        volatility_atr = talib.ATR(df['High'], df['Low'], df['Close'], timeperiod=14)
         volatility_bbands_upper, volatility_bbands_middle, volatility_bbands_lower = talib.BBANDS(df['Close'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
-        volatility_chv = talib.CHLV(df['High'], df['Low'], df['Close'])
         volatility_donch_upper, volatility_donch_lower = self.donchian_channel(df, period=20)
-        volatility_ulcer_index = self.ulcer_index(df, period=14)
         volatility_natr = talib.NATR(df['High'], df['Low'], df['Close'], timeperiod=14)
         volatility_trange = talib.TRANGE(df['High'], df['Low'], df['Close'])
-        volatility_bbands_upper, volatility_bbands_middle, volatility_bbands_lower = talib.BBANDS(df['Close'], timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
-        volatility_chv = talib.CHLV(df['High'], df['Low'], df['Close'])
-        volatility_donch_upper, volatility_donch_lower = self.donchian_channel(df, period=20).iloc[:, 1:].T
-        volatility_ulcer_index = self.ulcer_index(df, period=14)
+        volatility_ulcer_index = self.ulcer_index(df['Close'], period=14)
 
         volatility_df = pd.DataFrame({
             'Date': df['Date'],
@@ -253,17 +332,15 @@ class TechnicalIndicators(DataIngestion):
             'BBANDS_MIDDLE': volatility_bbands_middle,
             'BBANDS_LOWER': volatility_bbands_lower,
             'ULCER_INDEX': volatility_ulcer_index,
-            'CHV': volatility_chv,
             'DONCH_UPPER': volatility_donch_upper,
             'DONCH_LOWER': volatility_donch_lower
         })
         volatility_df = volatility_df.astype({'ATR': 'double', 'NATR': 'double', 'TRANGE': 'double',
                                                'BBANDS_UPPER': 'double', 'BBANDS_MIDDLE': 'double',
                                                'BBANDS_LOWER': 'double', 'ULCER_INDEX': 'double',
-                                               'CHV': 'double',
                                                'DONCH_UPPER': 'double', 'DONCH_LOWER': 'double'})
         volatility_df["Date"] = pd.to_datetime(volatility_df["Date"], utc=True)
-        
+
         logger.info("Volatility indicators calculated successfully.")
         return volatility_df
     def get_talib_pattern_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -289,7 +366,6 @@ class TechnicalIndicators(DataIngestion):
         pattern_cd3starsinsouth = talib.CDL3STARSINSOUTH(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cd3whitesoldiers = talib.CDL3WHITESOLDIERS(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlabandonedbaby = talib.CDLABANDONEDBABY(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdladvancingwhite = talib.CDLADVANCINGWHITE(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlbelthold = talib.CDLBELTHOLD(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlbreakaway = talib.CDLBREAKAWAY(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlclosingmarubozu = talib.CDLCLOSINGMARUBOZU(df['Open'], df['High'], df['Low'], df['Close'])
@@ -299,7 +375,7 @@ class TechnicalIndicators(DataIngestion):
         pattern_cdldoji = talib.CDLDOJI(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdldojistar = talib.CDLDOJISTAR(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlengulfing = talib.CDLENGULFING(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdleverystar = talib.CDLEVERYSTAR(df['Open'], df['High'], df['Low'], df['Close'])
+        pattern_cdleveningstar = talib.CDLEVENINGSTAR(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlgravestonedoji = talib.CDLGRAVESTONEDOJI(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlhammer = talib.CDLHAMMER(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlhangingman = talib.CDLHANGINGMAN(df['Open'], df['High'], df['Low'], df['Close'])
@@ -307,7 +383,7 @@ class TechnicalIndicators(DataIngestion):
         pattern_cdlharamicross = talib.CDLHARAMICROSS(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlhighwave = talib.CDLHIGHWAVE(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlhikkake = talib.CDLHIKKAKE(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdlhikkake2 = talib.CDLHIKKAKE2(df['Open'], df['High'], df['Low'], df['Close'])
+        pattern_cdlhikkakemod = talib.CDLHIKKAKEMOD(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlhomingpigeon = talib.CDLHOMINGPIGEON(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlidentical3crows = talib.CDLIDENTICAL3CROWS(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlinneck = talib.CDLINNECK(df['Open'], df['High'], df['Low'], df['Close'])
@@ -329,14 +405,12 @@ class TechnicalIndicators(DataIngestion):
         pattern_cdlshortline = talib.CDLSHORTLINE(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlspinningtop = talib.CDLSPINNINGTOP(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlstalledpattern = talib.CDLSTALLEDPATTERN(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdlstickysession = talib.CDLSTICKYSESSION(df['Open'], df['High'], df['Low'], df['Close'])
+        pattern_cdlsticksandwich = talib.CDLSTICKSANDWICH(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdltakuri = talib.CDLTAKURI(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdltasukigap = talib.CDLTASUKIGAP(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdltasukigap2 = talib.CDLTASUKIGAP2(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlthrusting = talib.CDLTHRUSTING(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdltristar = talib.CDLTRISTAR(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlunique3river = talib.CDLUNIQUE3RIVER(df['Open'], df['High'], df['Low'], df['Close'])
-        pattern_cdlupdowngap = talib.CDLUPDOWNGAP(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_cdlxsidegap3methods = talib.CDLXSIDEGAP3METHODS(df['Open'], df['High'], df['Low'], df['Close'])
         pattern_df = pd.DataFrame({
             'Date': df['Date'],
@@ -349,7 +423,6 @@ class TechnicalIndicators(DataIngestion):
             'CDL3STARSINSOUTH': pattern_cd3starsinsouth,
             'CDL3WHITESOLDIERS': pattern_cd3whitesoldiers,
             'CDLABANDONEDBABY': pattern_cdlabandonedbaby,
-            'CDLADVANCINGWHITE': pattern_cdladvancingwhite,
             'CDLBELTHOLD': pattern_cdlbelthold,
             'CDLBREAKAWAY': pattern_cdlbreakaway,
             'CDLCLOSINGMARUBOZU': pattern_cdlclosingmarubozu,
@@ -359,7 +432,7 @@ class TechnicalIndicators(DataIngestion):
             'CDLDOJI': pattern_cdldoji,
             'CDLDOJISTAR': pattern_cdldojistar,
             'CDLENGULFING': pattern_cdlengulfing,
-            'CDLEVERYSTAR': pattern_cdleverystar,
+            'CDLEVENINGSTAR': pattern_cdleveningstar,
             'CDLGRAVESTONEDOJI': pattern_cdlgravestonedoji,
             'CDLHAMMER': pattern_cdlhammer,
             'CDLHANGINGMAN': pattern_cdlhangingman,
@@ -367,7 +440,7 @@ class TechnicalIndicators(DataIngestion):
             'CDLHARAMICROSS': pattern_cdlharamicross,
             'CDLHIGHWAVE': pattern_cdlhighwave,
             'CDLHIKKAKE': pattern_cdlhikkake,
-            'CDLHIKKAKE2': pattern_cdlhikkake2,
+            'CDLHIKKAKEMOD': pattern_cdlhikkakemod,
             'CDLHOMINGPIGEON': pattern_cdlhomingpigeon,
             'CDLIDENTICAL3CROWS': pattern_cdlidentical3crows,
             'CDLINNECK': pattern_cdlinneck,
@@ -389,35 +462,33 @@ class TechnicalIndicators(DataIngestion):
             'CDLSHORTLINE': pattern_cdlshortline,
             'CDLSPINNINGTOP': pattern_cdlspinningtop,
             'CDLSTALLEDPATTERN': pattern_cdlstalledpattern,
-            'CDLSTICKYSESSION': pattern_cdlstickysession,
+            'CDLSTICKSANDWICH': pattern_cdlsticksandwich,
             'CDLTAKURI': pattern_cdltakuri,
             'CDLTASUKIGAP': pattern_cdltasukigap,
-            'CDLTASUKIGAP2': pattern_cdltasukigap2,
             'CDLTHRUSTING': pattern_cdlthrusting,
             'CDLTRISTAR': pattern_cdltristar,
             'CDLUNIQUE3RIVER': pattern_cdlunique3river,
-            'CDLUPDOWNGAP': pattern_cdlupdowngap,
             'CDLXSIDEGAP3METHODS': pattern_cdlxsidegap3methods
         })
 
         pattern_df = pattern_df.astype({
             'CDL2CROWS': 'double', 'CDL3BLACKCROWS': 'double', 'CDL3INSIDE': 'double',
             'CDL3LINESTRIKE': 'double', 'CDL3OUTSIDE': 'double', 'CDL3STARSINSOUTH': 'double',
-            'CDL3WHITESOLDIERS': 'double', 'CDLABANDONEDBABY': 'double', 'CDLADVANCINGWHITE': 'double',
+            'CDL3WHITESOLDIERS': 'double', 'CDLABANDONEDBABY': 'double',
             'CDLBELTHOLD': 'double', 'CDLBREAKAWAY': 'double', 'CDLCLOSINGMARUBOZU': 'double',
             'CDLCONCEALBABYSWALL': 'double', 'CDLCOUNTERATTACK': 'double', 'CDLDARKCLOUDCOVER': 'double',
-            'CDLDOJI': 'double', 'CDLDOJISTAR': 'double', 'CDLENGULFING': 'double', 'CDLEVERYSTAR': 'double',
+            'CDLDOJI': 'double', 'CDLDOJISTAR': 'double', 'CDLENGULFING': 'double', 'CDLEVENINGSTAR': 'double',
             'CDLGRAVESTONEDOJI': 'double', 'CDLHAMMER': 'double', 'CDLHANGINGMAN': 'double', 'CDLHARAMI': 'double',
-            'CDLHARAMICROSS': 'double', 'CDLHIGHWAVE': 'double', 'CDLHIKKAKE': 'double', 'CDLHIKKAKE2': 'double',
+            'CDLHARAMICROSS': 'double', 'CDLHIGHWAVE': 'double', 'CDLHIKKAKE': 'double', 'CDLHIKKAKEMOD': 'double',
             'CDLHOMINGPIGEON': 'double', 'CDLIDENTICAL3CROWS': 'double', 'CDLINNECK': 'double',
             'CDLINVERTEDHAMMER': 'double', 'CDLLADDERBOTTOM': 'double', 'CDLLONGLEGGEDDOJI': 'double',
             'CDLLONGLINE': 'double', 'CDLMARUBOZU': 'double', 'CDLMATCHINGLOW': 'double', 'CDLMATHOLD': 'double',
             'CDLMORNINGDOJISTAR': 'double', 'CDLMORNINGSTAR': 'double', 'CDLONNECK': 'double', 'CDLPIERCING': 'double',
             'CDLRICKSHAWMAN': 'double', 'CDLRISEFALL3METHODS': 'double', 'CDLSEPARATINGLINES': 'double',
             'CDLSHOOTINGSTAR': 'double', 'CDLSHORTLINE': 'double', 'CDLSPINNINGTOP': 'double',
-            'CDLSTALLEDPATTERN': 'double', 'CDLSTICKYSESSION': 'double', 'CDLTAKURI': 'double',
-            'CDLTASUKIGAP': 'double', 'CDLTASUKIGAP2': 'double', 'CDLTHRUSTING': 'double', 'CDLTRISTAR': 'double',
-            'CDLUNIQUE3RIVER': 'double', 'CDLUPDOWNGAP': 'double', 'CDLXSIDEGAP3METHODS': 'double'
+            'CDLSTALLEDPATTERN': 'double', 'CDLSTICKSANDWICH': 'double', 'CDLTAKURI': 'double',
+            'CDLTASUKIGAP': 'double', 'CDLTHRUSTING': 'double', 'CDLTRISTAR': 'double',
+            'CDLUNIQUE3RIVER': 'double', 'CDLXSIDEGAP3METHODS': 'double'
         })
         pattern_df["Date"] = pd.to_datetime(pattern_df["Date"], utc=True)
             
@@ -478,7 +549,7 @@ class TechnicalIndicators(DataIngestion):
         logger.info("Calculating cycle indicators...")
 
         ht_trendline = talib.HT_TRENDLINE(df['Close'])
-        ht_sine, ht_sine_lead, ht_sine_phase = talib.HT_SINE(df['Close'])
+        ht_sine, ht_sine_lead, = talib.HT_SINE(df['Close'])
         ht_dcperiod = talib.HT_DCPERIOD(df['Close'])
         ht_dcphase = talib.HT_DCPHASE(df['Close'])
 
@@ -488,13 +559,12 @@ class TechnicalIndicators(DataIngestion):
             'HT_TRENDLINE': ht_trendline,
             'HT_SINE': ht_sine,
             'HT_SINE_LEAD': ht_sine_lead,
-            'HT_SINE_PHASE': ht_sine_phase,
             'HT_DCPERIOD': ht_dcperiod,
             'HT_DCPHASE': ht_dcphase
         })
 
         cycle_df = cycle_df.astype({'HT_TRENDLINE': 'double', 'HT_SINE': 'double',
-                                     'HT_SINE_LEAD': 'double', 'HT_SINE_PHASE': 'double',
+                                     'HT_SINE_LEAD': 'double',
                                      'HT_DCPERIOD': 'double', 'HT_DCPHASE': 'double'})
         cycle_df["Date"] = pd.to_datetime(cycle_df["Date"], utc=True)
 
@@ -551,6 +621,13 @@ class TechnicalIndicators(DataIngestion):
             logger.warning("Macro DataFrame is empty. Skipping merge.")
             return
         
-        self.ticker_df = self.ticker_df.merge(self.macro_df, on='Date', how='left')
+        if 'Date' not in self.ticker_df.columns or 'Date' not in self.macro_df.columns:
+            logger.error("Both ticker_df and macro_df must have a 'Date' column for merging.")
+            return
+        
         self.ticker_df['Date'] = pd.to_datetime(self.ticker_df['Date'], utc=True)
+        self.macro_df['Date'] = pd.to_datetime(self.macro_df['Date'], utc=True)
+        logger.info("Converting 'Date' columns to datetime with UTC timezone...")
+        self.ticker_df = self.ticker_df.merge(self.macro_df, on='Date', how='left')
+        self.ticker_df.to_csv("storage/ticker_df_with_macro.csv", index=False)
         logger.info("Macro indicators merged successfully.")

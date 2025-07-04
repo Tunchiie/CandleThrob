@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class DataIngestion:
 
-    def __init__(self, start_date=None, end_date=None):
+    def __init__(self, tickers=None, macro=None, start_date=None, end_date=None):
         """ 
         Initialize the DataIngestion class.
         Args:
@@ -34,9 +34,7 @@ class DataIngestion:
             ValueError: If the start date is after the end date.
         """
         
-        self.sp50_tickers = self.get_sp500_tickers()
-        self.etf_tickers = self.get_etf_tickers()
-        self.all_tickers = self.sp50_tickers + self.etf_tickers
+        self.all_tickers = tickers
         self.end_date = end_date or date.today()
         self.start_date = start_date or date(year=self.end_date.year-50, month=self.end_date.month, day=self.end_date.day)
         self.ticker_df = None
@@ -44,25 +42,25 @@ class DataIngestion:
         if self.start_date > self.end_date:
             raise ValueError("Start date cannot be after end date. Please check the dates provided.")
         
-    def get_sp500_tickers(self):
-        """ 
-        Get the list of S&P 500 tickers.
-        Returns:
-            list: A list of S&P 500 ticker symbols.
-        """
-        tickers = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]["Symbol"].tolist()
-        return [self.clean_ticker(ticker) for ticker in tickers]
+    # def get_sp500_tickers(self):
+    #     """ 
+    #     Get the list of S&P 500 tickers.
+    #     Returns:
+    #         list: A list of S&P 500 ticker symbols.
+    #     """
+    #     tickers = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]["Symbol"].tolist()[:5]
+    #     return [self.clean_ticker(ticker) for ticker in tickers]
     
-    def get_etf_tickers(self):
-        """ 
-        Get the list of ETF tickers.
-        Returns:
-            list: A list of ETF ticker symbols.
-        """
-        etf_tickers = ['SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'TLT', 'GLD',
-                       'XLF', 'XLE', 'XLK', 'XLV', 'ARKK', 'VXX',
-                       'TQQQ', 'SQQQ', 'SOXL', 'XLI', 'XLY', 'XLP', 'SLV']
-        return [self.clean_ticker(ticker) for ticker in etf_tickers]
+    # def get_etf_tickers(self):
+    #     """ 
+    #     Get the list of ETF tickers.
+    #     Returns:
+    #         list: A list of ETF ticker symbols.
+    #     """
+    #     etf_tickers = ['SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'TLT', 'GLD',
+    #                    'XLF', 'XLE', 'XLK', 'XLV', 'ARKK', 'VXX',
+    #                    'TQQQ', 'SQQQ', 'SOXL', 'XLI', 'XLY', 'XLP', 'SLV']
+    #     return [self.clean_ticker(ticker) for ticker in etf_tickers]
     
     def fetch(self):
         """ 
@@ -75,8 +73,6 @@ class DataIngestion:
         logger.info("Starting data ingestion process...")
         logger.info(f"Fetching data from %s to %s", self.start_date, self.end_date)
         self.ingest_tickers()
-        print(self.ticker_df.index)  # Check if it shows MultiIndex
-
         self.enrich_data()
         self.ingest_fred_data()
         logger.info("Data ingestion process completed.")
@@ -108,14 +104,18 @@ class DataIngestion:
         
         while retries > 0:
             try:
-                price_history = yf.download(ticker, start=self.start_date, end=self.end_date)
+                price_history = yf.download(ticker, start=self.start_date, end=self.end_date, group_by='Ticker', auto_adjust=True)
                 if price_history.empty:
                     logger.warning("No data found for %s. Skipping.", ticker)
                     return None
+                
+                price_history = price_history.stack(level="Ticker", future_stack=True).reset_index(level="Ticker")
                 price_history['Ticker'] = ticker
                 price_history['Year'] = price_history.index.year
                 price_history['Month'] = price_history.index.month
                 price_history['Weekday'] = price_history.index.weekday
+                price_history.columns = [col for col in price_history.columns]
+                price_history.columns.name = None
                 logger.info("Successfully fetched data for %s.", ticker)
                 return price_history
             except Exception as e:
@@ -148,6 +148,7 @@ class DataIngestion:
             self.ticker_df = pd.concat(stock_data, ignore_index=True)
             self.ticker_df.sort_index(inplace=True)
             self.ticker_df.reset_index(names=["Date"], inplace=True)
+            self.ticker_df['Date'] = pd.to_datetime(self.ticker_df['Date']).dt.normalize()
             self.ticker_df = self.ticker_df.copy()
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
@@ -183,15 +184,16 @@ class DataIngestion:
 
         if self.ticker_df is None:
             raise ValueError("Ticker DataFrame is empty. Please run ingest_tickers() first.")
-    
+        
         self.ticker_df = self.ticker_df.merge(metadata_df, on="Ticker", how="left")
         self.ticker_df["Market Cap"] = self.ticker_df["Market Cap"].fillna(0).astype(float)
         self.ticker_df["Sector"] = self.ticker_df["Sector"].fillna("Unknown")
         self.ticker_df["Industry"] = self.ticker_df["Industry"].fillna("Unknown")
 
         for i in [1,3,7,30,90,365]:
-            self.ticker_df[f"Return_{i}d"] = self.ticker_df.groupby("Ticker")["Adj Close"]\
+            self.ticker_df[f"Return_{i}d"] = self.ticker_df.groupby("Ticker")["Close"]\
                 .pct_change(periods=i).fillna(0)
+        self.ticker_df["Date"] = pd.to_datetime(self.ticker_df["Date"]).dt.normalize()
 
     def ingest_fred_data(self):
         """ 
@@ -221,27 +223,33 @@ class DataIngestion:
             "RSAFS": "Retail Sales",
             "INDPRO": "Industrial Production Index",
             "M2SL": "M2 Money Supply",
-            "INFLATION": "Inflation Rate",
         }
 
-        fred_data = {name: fred_api.get_series(code, start_date=self.start_date, end_date=self.end_date) \
-            for code, name in fred_series.items()}
+        fred_data = {}
+        for code, name in fred_series.items():
+            try:
+                logger.info(f"Fetching FRED data for {name} ({code}) from {self.start_date} to {self.end_date}")
+                fred_data[name] = fred_api.get_series(code, start_date=self.start_date, end_date=self.end_date)
+            except Exception as e:
+                logger.error(f"Error fetching FRED data for {name} ({code}): {e}")
+
         fred_df = pd.DataFrame(fred_data)
         if fred_df.empty:
             raise ValueError("No data returned from FRED API. Check your API key and internet connection.")
-        
-        fred_df = fred_df.reset_index()
-        fred_df.rename(columns={'index': 'Date'}, inplace=True)
-        fred_df['Date'] = pd.to_datetime(fred_df['Date'], utc=True)
-        fred_df = fred_df.resample('D').mean().ffill().bfill().reset_index()
+
+        fred_df.index = pd.to_datetime(fred_df.index)
+        fred_df = fred_df.resample('D').mean().ffill().bfill()
+        fred_df.reset_index(names='Date', inplace=True)
+        fred_df['Date'] = fred_df['Date'].dt.normalize()
 
         if self.macro_df is not None and not self.macro_df.empty:
             self.macro_df = self.macro_df.merge(fred_df, on='Date', how='left')
         else:
             self.macro_df = fred_df
             
-
-        logger.info("FRED data fetched and merged with ticker data.")
+        self.macro_df.to_csv("storage/macro_data.csv", index=False)
+        
+        logger.info("FRED data fetched and stored successfully.")
 
     
     def save_data(self):
