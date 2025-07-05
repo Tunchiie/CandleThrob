@@ -46,7 +46,7 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
     data = DataIngestion(start_date=start, end_date=end)
-    data.fetch(ticker)
+    data.ingest_ticker_data(ticker)
     if df is not None and not df.empty and data.ticker_df is not None and not data.ticker_df.empty:
         data.ticker_df = pd.concat([df, data.ticker_df], ignore_index=True)
     else:
