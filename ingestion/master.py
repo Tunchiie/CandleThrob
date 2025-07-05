@@ -49,6 +49,12 @@ def update_ticker_data(ticker: str, path: str="tickers"):
     indicators.calculate_technical_indicators()
     if df is not None and not df.empty:
         indicators.transformed_df = pd.concat([df, indicators.transformed_df], ignore_index=True)
+    else:
+        logger.info("No existing data found for %s, using new data only.", ticker)
+        if indicators.transformed_df.empty:
+            logger.warning("No data was fetched for %s. Please check the ticker symbol or your internet connection.", ticker)
+            return
+        
     logger.info("Saving transformed ticker data to %s", filepath)
     upload_to_gcs(
         data=indicators.transformed_df,
@@ -65,19 +71,18 @@ def update_macro_data(filepath: str="data/macros/macro_data.parquet"):
     enrich_macros = EnrichMacros()
     enrich_macros.transform_macro_data()
     logger.info("Saving transformed macroeconomic data to %s", filepath)
-    if blob_exists(bucket_name="candlethrob-candata", blob_name="macros/macro_data.parquet"):
-        upload_to_gcs(
-            data=enrich_macros.transformed_df,
-            bucket_name="candlethrob-candata",
-            destination_blob_name="macros/macro_data.parquet",
-        )
+        
+    if enrich_macros.macro_df.empty:
+        logger.warning("No macroeconomic data was fetched. Please check your internet connection or the FRED API.")
+        return
     else:
-        logger.warning("No existing macro data found, creating new file.")
-        upload_to_gcs(
-            data=enrich_macros.macro_df,
-            bucket_name="candlethrob-candata",
-            destination_blob_name="macros/macro_data.parquet",
-        )
+        logger.info("Saving raw macroeconomic data to %s", filepath)
+    upload_to_gcs(
+        data=enrich_macros.macro_df,
+        bucket_name="candlethrob-candata",
+        destination_blob_name="macros/macro_data.parquet",
+    )
+
     logger.info("Macro data updated successfully.")
 
 def clean_ticker(ticker:str):
