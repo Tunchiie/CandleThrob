@@ -1,5 +1,5 @@
 import logging
-import os
+import time
 import re
 import time
 import yfinance as yf
@@ -125,6 +125,7 @@ class DataIngestion:
             ticker_df = self.ingest_ticker_data(ticker)
             if ticker_df is not None and not ticker_df.empty:
                 stock_data.append(ticker_df)
+            time.sleep(1.5)
                 
         if stock_data:
             stock_data = [df for df in stock_data if df is not None and not df.empty]
