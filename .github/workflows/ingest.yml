@@ -1,6 +1,9 @@
 name: Run Daily Ingestion and Transformation
 
 on:
+    push:
+        branches:
+            - main
     schedule:
         # Start ingestion at 9 PM EST (2 AM UTC during EST, 1 AM UTC during EDT)
         # Using 2 AM UTC year-round to be conservative for EST
