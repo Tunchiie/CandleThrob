@@ -81,7 +81,6 @@ jupyterlab-git==0.51.1
 jupyterlab-pygments==0.3.0
 jupyterlab-server==2.27.3
 kiwisolver==1.4.8
-libmambapy==1.5.8
 lxml==5.2.2
 MarkupSafe==3.0.2
 matplotlib==3.10.3
