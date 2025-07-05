@@ -77,7 +77,18 @@ class DataIngestion:
         return price_history
 
     def _fetch_polygon_data(self, ticker):
-        """Fetch OHLCV data using Polygon.io API."""
+        """
+        Fetch OHLCV data using Polygon.io API.
+        Args:
+            ticker (str): The ticker symbol to fetch data for.
+        Returns:
+            pd.DataFrame: A DataFrame containing historical OHLCV data for the ticker.
+        Raises:
+            requests.RequestException: If there is an issue with the API request.
+            KeyError: If the expected data structure is not found in the response.
+            ValueError: If the data cannot be parsed correctly.
+            TypeError: If there is a type mismatch in the data. 
+        """
         try:
             api_key = os.getenv("POLYGON_API_KEY")
             if not api_key:
@@ -150,8 +161,13 @@ class DataIngestion:
         """ 
         Fetch historical OHLCV stock data for a list of tickers using Polygon.io.
         Handles rate limiting (5 calls per minute for free tier).
+        Args:
+            tickers (list): A list of ticker symbols to fetch data for. If None,
         Returns:
             None: The method updates the ticker DataFrame in place with historical stock data for all tickers.
+        Raises:
+            ValueError: If no tickers are provided.
+            RuntimeError: If the Polygon.io API key is not set in the environment variables.
         """
         
         if not tickers:
