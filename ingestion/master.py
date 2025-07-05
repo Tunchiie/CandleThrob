@@ -28,12 +28,11 @@ def update_ticker_data(ticker: str, path: str="tickers"):
         path (str): The directory path where the ticker data is stored."""
     filepath = f"{path}/{ticker}.parquet"
     df = None
-    if blob_exists(bucket_name="candlethrob-candata", blob_name=f"{path}/{ticker}.parquet", credentials_path="secrets/gcs_key.json"):
+    if blob_exists(bucket_name="candlethrob-candata", blob_name=f"{path}/{ticker}.parquet"):
         logger.info("Loading existing ticker data from %s", filepath)
         df = load_from_gcs(
             bucket_name="candlethrob-candata",
             source_blob_name=f"{path}/{ticker}.parquet",
-            credentials_path="secrets/gcs_key.json"
         )
         if df.empty:
             logger.warning("No existing data found for %s, fetching new data.", ticker)
@@ -55,7 +54,6 @@ def update_ticker_data(ticker: str, path: str="tickers"):
         data=indicators.transformed_df,
         bucket_name="candlethrob-candata",
         destination_blob_name=f"{path}/{ticker}.parquet",
-        credentials_path="secrets/gcs_key.json"
     )
     
 def update_macro_data(filepath: str="data/macros/macro_data.parquet"):
@@ -67,14 +65,19 @@ def update_macro_data(filepath: str="data/macros/macro_data.parquet"):
     enrich_macros = EnrichMacros()
     enrich_macros.transform_macro_data()
     logger.info("Saving transformed macroeconomic data to %s", filepath)
-    if not os.path.exists(os.path.dirname(filepath)):
-        os.makedirs(os.path.dirname(filepath))
-    upload_to_gcs(
-        data=enrich_macros.transformed_df,
-        bucket_name="candlethrob-candata",
-        destination_blob_name="macros/macro_data.parquet",
-        credentials_path="secrets/gcs_key.json"
-    )
+    if blob_exists(bucket_name="candlethrob-candata", blob_name="macros/macro_data.parquet"):
+        upload_to_gcs(
+            data=enrich_macros.transformed_df,
+            bucket_name="candlethrob-candata",
+            destination_blob_name="macros/macro_data.parquet",
+        )
+    else:
+        logger.warning("No existing macro data found, creating new file.")
+        upload_to_gcs(
+            data=enrich_macros.macro_df,
+            bucket_name="candlethrob-candata",
+            destination_blob_name="macros/macro_data.parquet",
+        )
     logger.info("Macro data updated successfully.")
 
 def clean_ticker(ticker:str):

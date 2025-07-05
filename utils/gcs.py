@@ -63,7 +63,6 @@ def blob_exists(bucket_name:str, blob_name:str) -> bool:
     Args:
         bucket_name (str): The name of the GCS bucket.
         blob_name (str): The name of the blob to check.
-        credentials_path (str): Path to the GCS credentials JSON file.
     Returns:
         bool: True if the file exists, False otherwise.
     """
