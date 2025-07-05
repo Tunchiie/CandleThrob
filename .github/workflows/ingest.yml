@@ -36,12 +36,6 @@ jobs:
               with:
                 path: ~/.cache/pip
                 key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-                restore-keys: |
-                pip install --upgrade pip setuptools wheel
-                pip install ta-lib pandas yfinance lxml
-                pip install -r requirements.txt
-
-            - name: Set Up Google Cloud Credentials
 
 
             - name: Set Up Google Cloud Credentials
