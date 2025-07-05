@@ -53,6 +53,12 @@ jobs:
               run: |
                 echo "${{ secrets.GCS_KEY_BASE64 }}" | base64 --decode > ${{ github.workspace }}/gcs_key.json
                 echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/gcs_key.json" >> $GITHUB_ENV
+
+            - name: Authenticate with Google Cloud
+              uses: google-github-actions/auth@v2
+              with:
+                credentials_json: ${{ github.workspace }}/gcs_key.json
+                
             - name: Run Ingestion Script
               env:
                 GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
@@ -67,7 +73,7 @@ jobs:
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
                 if [ -f ingestion/debug.log ]; then
-                  gsutil cp ingestion/debug.log gs://candlethrob-candata/logs/ingestion/debug.log
+                  gsutil cp ingestion/debug.log gs://candlethrob-candata/logs/ingestion/debug_$(date +%F_%H-%M-%S).log
                 else
                   echo "No debug.log file found."
                 fi
