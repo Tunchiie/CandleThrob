@@ -27,16 +27,26 @@ jobs:
                 path: ~/.cache/pip
                 key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
 
-            - name: Install Python Dependencies
+            - name: Cache TA-Lib binary
+              uses: actions/cache@v4
+              with:
+                path: ta-lib_0.6.4_amd64.deb
+                key: ta-lib-0.6.4-amd64
+
+            - name: Download and Install System Dependencies and TA-Lib
               run: |
-                pip install -r requirements.txt
+                sudo apt-get update
+                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
                 if [ ! -f ta-lib_0.6.4_amd64.deb ]; then
                   wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
                 fi
-                sudo apt-get install -y -f
-                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
-                pip install ta-lib pandas yfinance lxml
+                sudo apt-get install -y -f
+
+            - name: Install Python Dependencies
+              run: |
+                pip install ta-lib
+                pip install -r requirements.txt
           
 
 
@@ -59,9 +69,6 @@ jobs:
               run: |
                 if [ -f debug.log ]; then
                   gsutil cp debug.log gs://candlethrob-candata/logs/ingestion/debug.log
-                else
-                  echo "No debug.log file found."
-                fi
                 else
                   echo "No debug.log file found."
                 fi
