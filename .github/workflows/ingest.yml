@@ -1,7 +1,9 @@
 name: Run Daily Ingestion
 
 on:
-
+    push:
+        branches:
+            - main # Removed to prevent push-triggered runs; now only scheduled
     schedule:
         - cron: '0 3 * * *' # Run daily at 3 AM UTC
 
