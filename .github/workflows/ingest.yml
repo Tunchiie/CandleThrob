@@ -14,42 +14,34 @@ jobs:
         steps:
             - name: Checkout Repository
               uses: actions/checkout@v4
-            - name: Install Ta-Lib and Dependencies
-              run: |
-                sudo apt-get update
-                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
-                wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
-                sudo dpkg -i ta-lib_0.6.4_amd64.deb
-                sudo apt-get install -y -f
-
-            - name: Upgrade pip, setuptools, and wheel
-              run: |
-                pip install --upgrade pip setuptools wheel
+            
+            - name: Set Up Python Environment
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.11'
+            # Removed redundant pip upgrade step; handled in Install System and Python Dependencies
 
             - name: Install Python Dependencies
               run: |
                 pip install ta-lib pandas yfinance lxml
                 pip install -r requirements.txt
-                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
                 if [ ! -f ta-lib_0.6.4_amd64.deb ]; then
                   wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
                 fi
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
                 sudo apt-get install -y -f
-
+                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
             - name: Cache Python dependencies
               uses: actions/cache@v4
               with:
                 path: ~/.cache/pip
                 key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
                 restore-keys: |
-                  ${{ runner.os }}-pip-
-
-            - name: Install Python dependencies
-              run: |
                 pip install --upgrade pip setuptools wheel
                 pip install ta-lib pandas yfinance lxml
                 pip install -r requirements.txt
+
+            - name: Set Up Google Cloud Credentials
 
 
             - name: Set Up Google Cloud Credentials
@@ -66,7 +58,7 @@ jobs:
 
             - name: upload debug.log to GCS
               env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs-key.json
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
                 if [ -f debug.log ]; then
@@ -74,4 +66,6 @@ jobs:
                 else
                   echo "No debug.log file found."
                 fi
-              
+                else
+                  echo "No debug.log file found."
+                fi
