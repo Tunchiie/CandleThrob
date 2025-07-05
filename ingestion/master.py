@@ -8,16 +8,18 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ingestion.fetch_data import DataIngestion
 from ingestion.enrich_tickers import TechnicalIndicators
 from ingestion.enrich_macros import EnrichMacros
+from utils.gcs import upload_to_gcs, load_from_gcs, blob_exists
 
 
 logging.basicConfig(
-    filename="debug.log",
+    filename="ingestion/debug.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-def update_ticker_data(ticker: str, path: str="data/tickers"):
+
+def update_ticker_data(ticker: str, path: str="tickers"):
     """
     Update the ticker data by fetching new data from the source.
 
@@ -26,14 +28,20 @@ def update_ticker_data(ticker: str, path: str="data/tickers"):
         path (str): The directory path where the ticker data is stored."""
     filepath = f"{path}/{ticker}.parquet"
     df = None
-    if not os.path.exists(filepath):
-        logger.error("File %s does not exist. Fetching new data.", filepath)
-        end = datetime.now().strftime("%Y-%m-%d")
-        start = (datetime.now() - pd.DateOffset(years=50)).strftime("%Y-%m-%d")
-    else:
-        df = pd.read_parquet(filepath)
-        start = df["Date"].max().strftime("%Y-%m-%d")
-        end = datetime.now().strftime("%Y-%m-%d")
+    if blob_exists(bucket_name="candlethrob-candata", blob_name=f"{path}/{ticker}.parquet", credentials_path="secrets/gcs_key.json"):
+        logger.info("Loading existing ticker data from %s", filepath)
+        df = load_from_gcs(
+            bucket_name="candlethrob-candata",
+            source_blob_name=f"{path}/{ticker}.parquet",
+            credentials_path="secrets/gcs_key.json"
+        )
+        if df.empty:
+            logger.warning("No existing data found for %s, fetching new data.", ticker)
+            start = "2020-01-01"
+        else:
+            # Get the last date in the existing data to determine the start date for new data
+            start = df["Date"].max().strftime("%Y-%m-%d")
+            end = datetime.now().strftime("%Y-%m-%d")
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
     data = DataIngestion(tickers=[ticker], start_date=start, end_date=end)
@@ -42,9 +50,15 @@ def update_ticker_data(ticker: str, path: str="data/tickers"):
     indicators.calculate_technical_indicators()
     if df is not None and not df.empty:
         indicators.transformed_df = pd.concat([df, indicators.transformed_df], ignore_index=True)
-    indicators.persist_transformed_data(file_path=filepath)
+    logger.info("Saving transformed ticker data to %s", filepath)
+    upload_to_gcs(
+        data=indicators.transformed_df,
+        bucket_name="candlethrob-candata",
+        destination_blob_name=f"{path}/{ticker}.parquet",
+        credentials_path="secrets/gcs_key.json"
+    )
     
-def update_macro_data(macro_df: pd.DataFrame, filepath: str="data/macros/macro_data.parquet"):
+def update_macro_data(filepath: str="data/macros/macro_data.parquet"):
     """
     Update the macroeconomic data by fetching new data from the FRED API.
     This function will fetch the latest macroeconomic indicators and save them to a CSV file.
@@ -53,7 +67,14 @@ def update_macro_data(macro_df: pd.DataFrame, filepath: str="data/macros/macro_d
     enrich_macros = EnrichMacros()
     enrich_macros.transform_macro_data()
     logger.info("Saving transformed macroeconomic data to %s", filepath)
-    enrich_macros.persist_transformed_data(path=filepath)
+    if not os.path.exists(os.path.dirname(filepath)):
+        os.makedirs(os.path.dirname(filepath))
+    upload_to_gcs(
+        data=enrich_macros.transformed_df,
+        bucket_name="candlethrob-candata",
+        destination_blob_name="macros/macro_data.parquet",
+        credentials_path="secrets/gcs_key.json"
+    )
     logger.info("Macro data updated successfully.")
 
 def clean_ticker(ticker:str):
@@ -86,11 +107,21 @@ def get_etf_tickers():
     return [clean_ticker(ticker) for ticker in etf_tickers]
 
 
-    
-if __name__ == "__main__":
-    # for sp500_ticker in get_sp500_tickers():
-    #     update_ticker_data(sp500_ticker)
-    # for etf_ticker in get_etf_tickers():
-    #     update_ticker_data(etf_ticker, path="data/etfs")
-    update_macro_data(pd.DataFrame(), filepath="data/macros/macro_data.parquet")
+def main():
+    """
+    Main function to run the data ingestion and enrichment process.
+    This function will update the ticker data for S&P 500 and ETFs, and also update the macroeconomic data.
+    """
+    logger.info("Starting data ingestion and enrichment process...")
+    # Update ticker data for S&P 500 and ETFs
+    for sp500_ticker in get_sp500_tickers():
+        update_ticker_data(sp500_ticker)
+    for etf_ticker in get_etf_tickers():
+        update_ticker_data(etf_ticker, path="etfs")
+    update_macro_data(filepath="data/macros/macro_data.parquet")
     logger.info("Data ingestion and enrichment completed successfully.")
+    
+
+if __name__ == "__main__":
+    main()
+    logger.info("Script executed successfully.")

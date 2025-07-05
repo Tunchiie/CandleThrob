@@ -21,6 +21,9 @@ sql/candlethrob.db
 *.env
 *.env.*
 var.env
+gcs_key.json
+*.json
+/secrets/*
 
 # CSV/data exports (optional, depends on what you want versioned)
 data/*.csv
