@@ -21,7 +21,7 @@ def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str)
         data (pd.DataFrame): The DataFrame to upload.
         destination_blob_name (str): The destination path in the GCS bucket.
     """
-
+    print(f"Uploading to GCS bucket: {bucket_name}, destination: {destination_blob_name}")
     client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
