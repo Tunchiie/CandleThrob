@@ -36,14 +36,14 @@ jobs:
                 GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
               working-directory: ${{ github.workspace }}
               run: |
-                python ingestion/master.py
+                python ingestion/ingest_data.py
 
-            - name: uploaad debug.log to GCS
+            - name: upload debug.log to GCS
               env:
                 GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
               run: |
                 if [ -f debug.log ]; then
-                  gsutil cp debug.log gs://candlethrob-candata2ws/logs/debug.log
+                  gsutil cp debug.log gs://candlethrob-candata/logs/ingestion/debug.log
                 else
                   echo "No debug.log file found."
                 fi

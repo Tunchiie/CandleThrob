@@ -1,9 +1,11 @@
 import logging
 import time
 import re
+import os
 import time
 import yfinance as yf
 import pandas as pd
+from fredapi import Fred
 from datetime import datetime
 from tqdm import tqdm
 
@@ -18,7 +20,7 @@ class DataIngestion:
     """
     Class for ingesting financial data from various sources.
     """
-    def __init__(self, tickers=None, start_date=None, end_date=None):
+    def __init__(self, start_date=None, end_date=None):
         """ 
         Initialize the DataIngestion class.
         Args:
@@ -26,16 +28,12 @@ class DataIngestion:
             Defaults to 50 years before the end date.
             end_date (date): The end date for fetching historical data. Defaults to today.
         Attributes:
-            sp50_tickers (list): List of S&P 500 ticker symbols.
-            etf_tickers (list): List of ETF ticker symbols.
-            all_tickers (list): Combined list of S&P 500 and ETF ticker symbols.
             ticker_df (pd.DataFrame): DataFrame to store historical stock data for all tickers.
             macro_df (pd.DataFrame): DataFrame to store macroeconomic data.
         Raises:
             ValueError: If the start date is after the end date.
         """
 
-        self.all_tickers = [self.clean_ticker(ticker) for ticker in tickers]
         self.end_date = datetime.strptime(end_date, "%Y-%m-%d") if end_date else datetime.now()
         self.start_date = datetime.strptime(start_date, "%Y-%m-%d") if start_date else (datetime.now() - pd.DateOffset(years=50))
         self.ticker_df = None
@@ -44,7 +42,7 @@ class DataIngestion:
             raise ValueError("Start date cannot be after end date. Please check the dates provided.")
         logger.info("DataIngestion initialized with start date: %s and end date: %s", self.start_date, self.end_date)
     
-    def fetch(self):
+    def fetch(self, tickers=None):
         """ 
         Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
         This method downloads historical stock data for each ticker using yfinance, enriches the data with additional information,
@@ -54,8 +52,7 @@ class DataIngestion:
         """
         logger.info("Starting data ingestion process...")
         logger.info("Fetching data from %s to %s", self.start_date, self.end_date)
-        self.ingest_tickers()
-        self.enrich_data()
+        self.ingest_tickers(tickers)
         logger.info("Data ingestion process completed.")
     
     @staticmethod
@@ -109,7 +106,7 @@ class DataIngestion:
         logger.error("Failed to fetch data for %s after multiple retries.", ticker)
         return None
 
-    def ingest_tickers(self):
+    def ingest_tickers(self, tickers=None):
         """ 
         Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
         Returns:
@@ -120,7 +117,7 @@ class DataIngestion:
         
         stock_data = []
         # Download stock data from yfinance
-        tq = tqdm(self.all_tickers, desc="Downloading")
+        tq = tqdm(tickers, desc="Downloading")
         for _, ticker in enumerate(tq):
             ticker_df = self.ingest_ticker_data(ticker)
             if ticker_df is not None and not ticker_df.empty:
@@ -135,44 +132,56 @@ class DataIngestion:
             self.ticker_df = self.ticker_df.copy()
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
-            logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", self.all_tickers)
+            logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", tickers)
+            raise ValueError("No stock data was fetched. Please check your internet connection or ticker symbols.")
 
-    def enrich_data(self):
+    def fetch_fred_data(self):
         """ 
-        Enrich the ticker data with additional information such as market cap, sector, and industry.
-        This method fetches data from yfinance and updates the ticker DataFrame with market cap, sector, and industry information.
-        It also calculates returns for various periods (1, 3, 7, 30, 90, and 365 days).
+        Fetch economic data from the Federal Reserve Economic Data (FRED) API.
+        This method retrieves various economic indicators such as GDP, unemployment rate, inflation rate, and interest rates.
+        It stores the data in a DataFrame and merges it with the ticker DataFrame based on the date.
         Returns:
-            None: The method updates the ticker DataFrame in place with additional columns for market cap,
+            None: The method updates the ticker DataFrame in place with additional columns for economic indicators.
+        Raises:
+            Exception: If the FRED API key is not set in the environment variables.
         """
-        # Fetch market cap, sector, and industry data from yfinance
-        logger.info("Enriching data with market cap, sector, and industry information...")
-        ticker_info = yf.Tickers(self.all_tickers).tickers
-        metadata = []
         
-        for ticker in tqdm(ticker_info, desc="Enriching Data"):
-            info = ticker_info[ticker].info
-            metadata.append({
-                "Ticker": ticker,
-                "Market Cap": info.get("marketCap", None),
-                "Sector": info.get("sector", None),
-                "Industry": info.get("industry", None)
-            })
-            
-        metadata_df = pd.DataFrame(metadata)
-        if metadata_df.empty:
-            logger.error("No metadata was fetched. Please check your internet connection or ticker symbols.")
-            raise ValueError("No metadata was fetched. Please check your internet connection or ticker symbols.")
+        if not os.getenv("FRED_API_KEY"):
+            raise RuntimeError("FRED API key is not set. Please set the FRED_API_KEY environment variable.")
 
-        if self.ticker_df is None:
-            raise ValueError("Ticker DataFrame is empty. Please run ingest_tickers() first.")
-        
-        self.ticker_df = self.ticker_df.merge(metadata_df, on="Ticker", how="left")
-        self.ticker_df["Market Cap"] = self.ticker_df["Market Cap"].fillna(0).astype(float)
-        self.ticker_df["Sector"] = self.ticker_df["Sector"].fillna("Unknown")
-        self.ticker_df["Industry"] = self.ticker_df["Industry"].fillna("Unknown")
+        fred_api = Fred(os.getenv("FRED_API_KEY"))
+        fred_series = {
+            "FEDFUNDS": "Federal_Funds_Rate",
+            "CPIAUCSL": "Consumer_Price_Index",
+            "UNRATE": "Unemployment_Rate",
+            "GDP": "Gross_Domestic_Product",
+            "GS10": "10-Year_Treasury_Rate",
+            "USREC": "Recession_Indicator",
+            "UMCSENT": "Consumer_Sentiment",
+            "HOUST": "Housing_Starts",
+            "RSAFS": "Retail_Sales",
+            "INDPRO": "Industrial_Production_Index",
+            "M2SL": "M2_Money_Supply",
+        }
 
-        for i in [1,3,7,30,90,365]:
-            self.ticker_df[f"Return_{i}d"] = self.ticker_df.groupby("Ticker")["Close"]\
-                .pct_change(periods=i).fillna(0)
-        self.ticker_df["Date"] = pd.to_datetime(self.ticker_df["Date"])
+        fred_data = {}
+        for code, name in fred_series.items():
+            try:
+                logger.info("Fetching FRED data for %s (%s) from %s to %s", name, code, self.start_date, self.end_date)
+                fred_data[code] = fred_api.get_series(code, start_date=self.start_date.strftime("%Y-%m-%d"), end_date=self.end_date.strftime("%Y-%m-%d"))
+            except Exception as e:
+                logger.error("Error fetching FRED data for %s (%s): %s", name, code, e)
+        fred_df = pd.DataFrame(fred_data)
+        if fred_df.empty:
+            raise ValueError("No data returned from FRED API. Check your API key and internet connection.")
+
+        fred_df.index = pd.to_datetime(fred_df.index)
+        fred_df = fred_df.resample('D').mean().ffill().bfill()
+        fred_df.reset_index(names='Date', inplace=True)
+        fred_df['Date'] = fred_df['Date'].dt.normalize()
+
+        if self.macro_df is not None and not self.macro_df.empty:
+            self.macro_df = self.macro_df.merge(fred_df, on='Date', how='left')
+        else:
+            self.macro_df = fred_df        
+        logger.info("FRED data fetched and stored successfully.")

@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ingestion.fetch_data import DataIngestion
-from ingestion.transform_data import TechnicalIndicators
+from ingestion.enrich_data import TechnicalIndicators
 import pandas as pd
 
 """
@@ -17,8 +17,8 @@ import pandas as pd
 @pytest.fixture
 def sample_tickers():
     print("Setting up sample tickers for testing...")
-    data = DataIngestion(tickers=["AAPL", "GOOGL"], start_date="2022-01-01", end_date="2022-12-31")
-    data.fetch()
+    data = DataIngestion(start_date="2022-01-01", end_date="2022-12-31")
+    data.fetch(tickers=["AAPL", "GOOGL"])
     return data
 
 def test_technical_indicators(sample_tickers):
@@ -61,6 +61,8 @@ def test_indicators(sample_tickers):
     assert indicators.get_talib_pattern_indicators(pd.DataFrame()).empty
     assert indicators.get_talib_volatility_indicators(pd.DataFrame()).empty
     assert indicators.get_talib_cyclical_indicators(pd.DataFrame()).empty
+    
+    indicators.transform()
     assert isinstance(indicators.transformed_df, pd.DataFrame)
     # Check if indicators were calculated
     indicators.calculate_technical_indicators()

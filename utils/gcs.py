@@ -75,3 +75,26 @@ def blob_exists(bucket_name:str, blob_name:str) -> bool:
     logger.info(f"File %s exists: %s", blob_name, exists)
     
     return exists
+
+def load_all_gcs_data(bucket_name:str, prefix:str) -> pd.DataFrame:
+    """
+    Loads all DataFrames from a specific prefix in the Google Cloud Storage bucket.
+    Args:
+        bucket_name (str): The name of the GCS bucket.
+        prefix (str): The prefix to filter blobs.
+    Returns:
+        pd.DataFrame: Concatenated DataFrame of all loaded data.
+    """
+    client = storage.Client(credentials=credentials, project=project_id)
+    bucket = client.bucket(bucket_name)
+    
+    blobs = bucket.list_blobs(prefix=prefix)
+    
+    dataframes = []
+    
+    for blob in blobs:
+        if blob.name.endswith('.parquet'):
+            df = load_from_gcs(bucket_name, blob.name)
+            dataframes.append(df)
+    logger.info(f"Loaded %d DataFrames from prefix %s in bucket %s.", len(dataframes), prefix, bucket_name)
+    return dataframes

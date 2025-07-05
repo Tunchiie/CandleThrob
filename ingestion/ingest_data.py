@@ -6,8 +6,8 @@ import logging
 from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ingestion.fetch_data import DataIngestion
-from ingestion.transform_data import TechnicalIndicators
-from ingestion.enrich_macros import EnrichMacros
+from ingestion.enrich_data import TechnicalIndicators
+from ingestion.enrich_data import EnrichMacros
 from utils.gcs import upload_to_gcs, load_from_gcs, blob_exists
 
 
@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def update_ticker_data(ticker: str, path: str="tickers"):
+def update_ticker_data(ticker: str, path: str="raw/tickers"):
     """
     Update the ticker data by fetching new data from the source.
 
@@ -43,44 +43,42 @@ def update_ticker_data(ticker: str, path: str="tickers"):
             end = datetime.now().strftime("%Y-%m-%d")
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
-    data = DataIngestion(tickers=[ticker], start_date=start, end_date=end)
-    data.fetch()
-    indicators = TechnicalIndicators(ticker_df=data.ticker_df)
-    indicators.calculate_technical_indicators()
+    data = DataIngestion(start_date=start, end_date=end)
+    data.fetch(tickers=ticker)
     if df is not None and not df.empty:
-        indicators.transformed_df = pd.concat([df, indicators.transformed_df], ignore_index=True)
+        data.ticker_df = pd.concat([df, data.ticker_df], ignore_index=True)
     else:
         logger.info("No existing data found for %s, using new data only.", ticker)
-        if indicators.transformed_df.empty:
+        if data.ticker_df.empty:
             logger.warning("No data was fetched for %s. Please check the ticker symbol or your internet connection.", ticker)
             return
         
     logger.info("Saving transformed ticker data to %s", filepath)
     upload_to_gcs(
-        data=indicators.transformed_df,
+        data=data.ticker_df,
         bucket_name="candlethrob-candata",
         destination_blob_name=f"{path}/{ticker}.parquet",
     )
     
-def update_macro_data(filepath: str="data/macros/macro_data.parquet"):
+def update_macro_data(filepath: str="raw/macros/macro_data.parquet"):
     """
     Update the macroeconomic data by fetching new data from the FRED API.
     This function will fetch the latest macroeconomic indicators and save them to a CSV file.
     """
     logger.info("Updating macroeconomic data...")
-    enrich_macros = EnrichMacros()
-    enrich_macros.transform_macro_data()
+    data = DataIngestion()
+    data.fetch_fred_data()
     logger.info("Saving transformed macroeconomic data to %s", filepath)
-        
-    if enrich_macros.macro_df.empty:
+
+    if data.macro_df.empty:
         logger.warning("No macroeconomic data was fetched. Please check your internet connection or the FRED API.")
         return
     else:
         logger.info("Saving raw macroeconomic data to %s", filepath)
     upload_to_gcs(
-        data=enrich_macros.macro_df,
+        data=data.macro_df,
         bucket_name="candlethrob-candata",
-        destination_blob_name="macros/macro_data.parquet",
+        destination_blob_name=filepath,
     )
 
     logger.info("Macro data updated successfully.")
@@ -125,8 +123,8 @@ def main():
     for sp500_ticker in get_sp500_tickers():
         update_ticker_data(sp500_ticker)
     for etf_ticker in get_etf_tickers():
-        update_ticker_data(etf_ticker, path="etfs")
-    update_macro_data(filepath="data/macros/macro_data.parquet")
+        update_ticker_data(etf_ticker, path="raw/etfs")
+    update_macro_data(filepath="raw/macros/macro_data.parquet")
     logger.info("Data ingestion and enrichment completed successfully.")
     
 

@@ -1,20 +1,21 @@
-name: Transform Data
-on:
-  push:
-    branches:
-      - main
+name: Run Daily Transformation
 
-  schedule:
-    - cron: '0 4 * * *' # Run daily at 4 AM UTC
+on:
+    push:
+        branches:
+            - main
+
+    schedule:
+        - cron: '0 3 * * *' # Run daily at 3 AM UTC
 
 jobs:
-  transform:
-    runs-on: ubuntu-latest
-    steps:
-        - name: Checkout Repository
-          uses: actions/checkout@v4
-        - name: Install Ta-Lib and Dependencies
-          run: |
+    ingest:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
+            - name: Install Ta-Lib and Dependencies
+              run: |
                 sudo apt-get update
                 sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
                 wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
@@ -23,16 +24,27 @@ jobs:
                 pip install ta-lib
                 pip install pandas
                 pip install -r requirements.txt
-            
-        - name: Set Up Google Cloud Credentials
-          id: auth
-          uses: google-github-actions/auth@v2
-          with:
-            credentials_json: ${{ secrets.GCS_KEY }}
-        
-        - name: Run Transformation Script
-          env:
-            GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-          working-directory: ${{ github.workspace }}
-          run: |
-            
+
+            - name: Set Up Google Cloud Credentials
+              id: auth
+              uses: google-github-actions/auth@v2
+              with:
+                credentials_json: ${{ secrets.GCS_KEY }}
+
+            - name: Run Transformation Script
+              env:
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+              working-directory: ${{ github.workspace }}
+              run: |
+                python ingestion/transform_data.py
+
+            - name: upload debug.log to GCS
+              env:
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+              run: |
+                if [ -f debug.log ]; then
+                  gsutil cp debug.log gs://candlethrob-candata/logs/transformation/debug.log
+                else
+                  echo "No debug.log file found."
+                fi
+              
