@@ -22,8 +22,7 @@ jobs:
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
                 sudo apt-get install -y -f
                 pip install --upgrade pip setuptools wheel
-                pip install -- upgrade yfinance
-                pip install ta-lib pandas
+                pip install ta-lib pandas yfinance
                 pip install -r requirements.txt
 
 
