@@ -21,10 +21,6 @@ cffi==1.17.1
 charset-normalizer==3.4.2
 colorama==0.4.6
 comm==0.2.2
-conda==24.5.0
-conda-libmamba-solver==24.5.0
-conda-package-handling==2.3.0
-conda-package-streaming==0.9.0
 contourpy==1.3.2
 cryptography==41.0.4
 curl-cffi==0.6.7
