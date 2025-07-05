@@ -51,26 +51,23 @@ jobs:
 
             - name: Set Up Google Cloud Credentials
               run: |
-                echo "${{ secrets.GCS_KEY_BASE64 }}" | base64 --decode > ${{ github.workspace }}/gcs_key.json
-                echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/gcs_key.json" >> $GITHUB_ENV
+                echo "${{ secrets.GCS_KEY_BASE64 }}" | base64 --decode > ${{ github.workspace }}/gcs-key.json
 
             - name: Authenticate with Google Cloud
               uses: google-github-actions/auth@v2
               with:
-                credentials_json: ${{ github.workspace }}/gcs_key.json
-                
+                credentials_json: ${{ secrets.GCS_KEY_BASE64 }}
+
+            - name: Set up Cloud SDK
+              uses: google-github-actions/setup-gcloud@v2
             - name: Run Ingestion Script
               env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               working-directory: ${{ github.workspace }}
               run: |
                 python ingestion/ingest_data.py
 
             - name: upload debug.log to GCS
-              env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
-                FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
                 if [ -f ingestion/debug.log ]; then
                   gsutil cp ingestion/debug.log gs://candlethrob-candata/logs/ingestion/debug_$(date +%F_%H-%M-%S).log
