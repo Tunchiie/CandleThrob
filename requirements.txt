@@ -175,3 +175,4 @@ websockets==10.4
 wheel==0.43.0
 yarl==1.20.1
 zstandard==0.19.0
+websockets>=11.0,<12.0
