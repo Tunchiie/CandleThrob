@@ -1,9 +1,10 @@
-name: Run Daily Transformation
+name: Run Data Transformation
 
 on:
-
     schedule:
-        - cron: '0 3 * * *' # Run daily at 3 AM UTC
+        # Start transformation 1 hour after ingestion ends 
+        # Ingestion runs from 2:00-7:15 AM UTC, so transform at 8:30 AM UTC
+        - cron: '30 8 * * *'   # Transform at 8:30 AM UTC (3:30 AM EST)
 
 jobs:
     transform:

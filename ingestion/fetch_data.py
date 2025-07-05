@@ -55,19 +55,19 @@ class DataIngestion:
     
     def ingest_ticker_data(self, ticker) -> pd.DataFrame:
         """ 
-        Ingest historical stock data for a given ticker using Polygon.io API.
+        Ingest historical stock data for a given ticker using Polygon.io API only.
         Args:
             ticker (str): The ticker symbol to fetch data for.
         Returns:
-            pd.DataFrame: A DataFrame containing historical stock data for the ticker.
+            pd.DataFrame: The DataFrame containing OHLCV data.
         """
-        logger.info("Fetching data for %s from %s to %s", ticker, self.start_date, self.end_date)
+        logger.info("Fetching Polygon.io data for %s from %s to %s", ticker, self.start_date, self.end_date)
         
         if not ticker or ticker.strip() == "":
             logger.warning("Ticker is empty. Skipping.")
             return pd.DataFrame()
         
-        # Use Polygon.io as primary data source
+        # Use Polygon.io as the sole data source for consistency and quality
         price_history = self._fetch_polygon_data(ticker)
         
         if price_history is None or price_history.empty:
@@ -159,15 +159,13 @@ class DataIngestion:
 
     def ingest_tickers(self, tickers=None):
         """ 
-        Fetch historical OHLCV stock data for a list of tickers using Polygon.io.
-        Handles rate limiting (5 calls per minute for free tier).
+        Fetch historical OHLCV stock data for a list of tickers using Polygon.io API only.
         Args:
-            tickers (list): A list of ticker symbols to fetch data for. If None,
+            tickers (list): A list of ticker symbols to fetch data for.
         Returns:
             None: The method updates the ticker DataFrame in place with historical stock data for all tickers.
         Raises:
             ValueError: If no tickers are provided.
-            RuntimeError: If the Polygon.io API key is not set in the environment variables.
         """
         
         if not tickers:
@@ -175,18 +173,21 @@ class DataIngestion:
             return None
             
         stock_data = []
-        # Rate limiting: 5 calls per minute = 12 seconds between calls
-        rate_limit_delay = 12  # seconds between API calls
         
         tq = tqdm(tickers, desc="Downloading OHLCV from Polygon.io")
+        
         for i, ticker in enumerate(tq):
+            tq.set_postfix({"ticker": ticker})
+            
             ticker_df = self.ingest_ticker_data(ticker)
+            
             if ticker_df is not None and not ticker_df.empty:
                 stock_data.append(ticker_df)
             
-            # Rate limiting: wait between API calls (except for the last one)
+            # Rate limiting: 5 calls per minute = 12 seconds between calls
             if i < len(tickers) - 1:
-                logger.info("Rate limiting: waiting %d seconds before next API call", rate_limit_delay)
+                rate_limit_delay = 12  # seconds between Polygon API calls
+                logger.info("Rate limiting: waiting %d seconds after Polygon.io call", rate_limit_delay)
                 time.sleep(rate_limit_delay)
                 
         if stock_data:
@@ -195,9 +196,10 @@ class DataIngestion:
             self.ticker_df.sort_index(inplace=True)
             self.ticker_df['Date'] = pd.to_datetime(self.ticker_df['Date'])
             self.ticker_df = self.ticker_df.copy()
-            logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
+            logger.info("Fetched data for %d tickers using Polygon.io API.", 
+                       len(self.ticker_df['Ticker'].unique()))
         else:
-            logger.error("No stock data was fetched for %s. Please check your internet connection or API key.", tickers)
+            logger.error("No stock data was fetched for %s. Please check your internet connection or Polygon.io API key.", tickers)
             return None
 
     def fetch_fred_data(self):

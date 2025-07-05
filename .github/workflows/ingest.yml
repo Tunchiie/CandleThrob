@@ -1,11 +1,31 @@
-name: Run Daily Ingestion
+name: Run Daily Ingestion and Transformation
 
 on:
-    push:
-        branches:
-            - main # Removed to prevent push-triggered runs; now only scheduled
     schedule:
-        - cron: '0 3 * * *' # Run daily at 3 AM UTC
+        # Start ingestion at 9 PM EST (2 AM UTC during EST, 1 AM UTC during EDT)
+        # Using 2 AM UTC year-round to be conservative for EST
+        - cron: '0 2 * * *'   # Batch 0 at 2 AM UTC (9 PM EST)
+        - cron: '15 2 * * *'  # Batch 1 at 2:15 AM UTC
+        - cron: '30 2 * * *'  # Batch 2 at 2:30 AM UTC  
+        - cron: '45 2 * * *'  # Batch 3 at 2:45 AM UTC
+        - cron: '0 3 * * *'   # Batch 4 at 3:00 AM UTC
+        - cron: '15 3 * * *'  # Batch 5 at 3:15 AM UTC
+        - cron: '30 3 * * *'  # Batch 6 at 3:30 AM UTC
+        - cron: '45 3 * * *'  # Batch 7 at 3:45 AM UTC
+        - cron: '0 4 * * *'   # Batch 8 at 4:00 AM UTC
+        - cron: '15 4 * * *'  # Batch 9 at 4:15 AM UTC
+        - cron: '30 4 * * *'  # Batch 10 at 4:30 AM UTC
+        - cron: '45 4 * * *'  # Batch 11 at 4:45 AM UTC
+        - cron: '0 5 * * *'   # Batch 12 at 5:00 AM UTC
+        - cron: '15 5 * * *'  # Batch 13 at 5:15 AM UTC
+        - cron: '30 5 * * *'  # Batch 14 at 5:30 AM UTC
+        - cron: '45 5 * * *'  # Batch 15 at 5:45 AM UTC
+        - cron: '0 6 * * *'   # Batch 16 at 6:00 AM UTC
+        - cron: '15 6 * * *'  # Batch 17 at 6:15 AM UTC
+        - cron: '30 6 * * *'  # Batch 18 at 6:30 AM UTC
+        - cron: '45 6 * * *'  # Batch 19 at 6:45 AM UTC
+        - cron: '0 7 * * *'   # Batch 20 at 7:00 AM UTC
+        - cron: '15 7 * * *'  # Batch 21 at 7:15 AM UTC
 
 jobs:
     ingest:
@@ -43,12 +63,84 @@ jobs:
 
             - name: Set up Cloud SDK
               uses: google-github-actions/setup-gcloud@v2
+
+            - name: Determine Batch Number
+              id: batch
+              run: |
+                # Determine batch number based on current hour and minute
+                current_hour=$(date -u +%H)
+                current_minute=$(date -u +%M)
+                
+                # Calculate batch number based on 15-minute intervals starting at 2 AM UTC
+                if [ "$current_hour" = "02" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=0" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "30" ]; then
+                    echo "batch_number=1" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "45" ]; then
+                    echo "batch_number=2" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=3" >> $GITHUB_OUTPUT
+                  fi
+                elif [ "$current_hour" = "03" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=4" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "30" ]; then
+                    echo "batch_number=5" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "45" ]; then
+                    echo "batch_number=6" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=7" >> $GITHUB_OUTPUT
+                  fi
+                elif [ "$current_hour" = "04" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=8" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "30" ]; then
+                    echo "batch_number=9" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "45" ]; then
+                    echo "batch_number=10" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=11" >> $GITHUB_OUTPUT
+                  fi
+                elif [ "$current_hour" = "05" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=12" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "30" ]; then
+                    echo "batch_number=13" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "45" ]; then
+                    echo "batch_number=14" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=15" >> $GITHUB_OUTPUT
+                  fi
+                elif [ "$current_hour" = "06" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=16" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "30" ]; then
+                    echo "batch_number=17" >> $GITHUB_OUTPUT
+                  elif [ "$current_minute" -lt "45" ]; then
+                    echo "batch_number=18" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=19" >> $GITHUB_OUTPUT
+                  fi
+                elif [ "$current_hour" = "07" ]; then
+                  if [ "$current_minute" -lt "15" ]; then
+                    echo "batch_number=20" >> $GITHUB_OUTPUT
+                  else
+                    echo "batch_number=21" >> $GITHUB_OUTPUT
+                  fi
+                else
+                  echo "batch_number=0" >> $GITHUB_OUTPUT
+                fi
+
             - name: Run Ingestion Script
               env:
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
                 POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+                BATCH_NUMBER: ${{ steps.batch.outputs.batch_number }}
+                BATCH_SIZE: 25
               working-directory: ${{ github.workspace }}
               run: |
+                echo "Running batch $BATCH_NUMBER with batch size $BATCH_SIZE"
                 python ingestion/ingest_data.py
 
             - name: upload debug.log to GCS
