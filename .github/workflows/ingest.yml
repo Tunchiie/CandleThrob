@@ -27,10 +27,10 @@ jobs:
 
 
             - name: Set Up Google Cloud Credentials
-              id: auth
-              uses: google-github-actions/auth@v2
-              with:
-                credentials_json: ${{ secrets.GCS_KEY }}
+              run: |
+                echo "${{ secrets.GCS_KEY }}" >> $GITHUB_ENV
+                echo "FRED_API_KEY=${{ secrets.FRED_API_KEY }}" >> gcs-key.json
+                export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcs-key.json
 
             - name: Run Ingestion Script
               env:
