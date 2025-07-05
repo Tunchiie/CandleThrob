@@ -10,7 +10,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def transform__ticker_data(bucket_name: str, source_blob_name: str):
+def transform_ticker_data(bucket_name: str, source_blob_name: str):
     """
     Transforms the data by enriching it with market cap, sector, and industry information.
     Args:
@@ -18,7 +18,7 @@ def transform__ticker_data(bucket_name: str, source_blob_name: str):
         source_blob_name (str): The source path in the GCS bucket.
     """
     # Load the ticker data from GCS
-    ticker_df = load_from_gcs(bucket_name, source_blob_name)
+    ticker_df = load_all_gcs_data(bucket_name, source_blob_name)
     if ticker_df.empty:
         print(f"No data found in {source_blob_name}. Please check the bucket and blob name.")
         return
@@ -38,7 +38,8 @@ def transform__ticker_data(bucket_name: str, source_blob_name: str):
             continue
         
         # Save the enriched data back to GCS
-        destination_blob_name = f"enriched/tickers/enrich_data.transformed_{df['Ticker'].iloc[0]}.parquet"
+        ticker_name = df['Ticker'].iloc[0] if not df['Ticker'].empty else "unknown_ticker"
+        destination_blob_name = f"enriched/tickers/{ticker_name}_transformed.parquet"
         upload_to_gcs(enrich_data.transformed_df, bucket_name, destination_blob_name)
         logger.info(f"Enriched data for {df['Ticker'].iloc[0]} uploaded to {destination_blob_name}")
 
@@ -64,7 +65,7 @@ def transform_macro_data(bucket_name: str, source_blob_name: str):
         return
 
     # Save the enriched data back to GCS
-    destination_blob_name = f"enriched/macros/enrich_data.transformed.parquet"
+    destination_blob_name = f"enriched/macros/macros_transformed.parquet"
     upload_to_gcs(enrich_data.transformed_df, bucket_name, destination_blob_name)
     logger.info(f"Enriched macro data uploaded to {destination_blob_name}")
     
@@ -79,5 +80,5 @@ def main():
     transform__ticker_data(bucket_name, ticker_source_blob_name)
     
     # Transform macroeconomic data
-    macro_source_blob_name = "raw/macros"
+    macro_source_blob_name = "raw/macros/"
     transform_macro_data(bucket_name, macro_source_blob_name)
