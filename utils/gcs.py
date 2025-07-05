@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from google.cloud import storage
 from io import BytesIO
-from pathlib import Path
+import google.auth
 
 logging.basicConfig(
     filename="utils/debug.log",
