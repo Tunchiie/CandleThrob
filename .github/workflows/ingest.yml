@@ -66,8 +66,8 @@ jobs:
                 GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
-                if [ -f debug.log ]; then
-                  gsutil cp debug.log gs://candlethrob-candata/logs/ingestion/debug.log
+                if [ -f ingestion/debug.log ]; then
+                  gsutil cp ingestion/debug.log gs://candlethrob-candata/logs/ingestion/debug.log
                 else
                   echo "No debug.log file found."
                 fi
