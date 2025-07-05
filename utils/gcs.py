@@ -11,18 +11,17 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-    
-def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str, credentials_path:str):
+credentials, project_id = google.auth.default()
+
+def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str):
     """
     Uploads a DataFrame to the Google Cloud Storage bucket.
     Args:
         bucket_name (str): The name of the GCS bucket.
         data (pd.DataFrame): The DataFrame to upload.
         destination_blob_name (str): The destination path in the GCS bucket.
-        credentials_path (str): Path to the GCS credentials JSON file.
     """
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-    client = storage.Client()
+    client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
 
@@ -35,18 +34,16 @@ def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str,
 
     logger.info(f"File %s uploaded to %s.", buffer, destination_blob_name)
     
-def load_from_gcs(bucket_name:str, source_blob_name:str, credentials_path:str) -> pd.DataFrame:
+def load_from_gcs(bucket_name:str, source_blob_name:str) -> pd.DataFrame:
     """
     Loads a DataFrame from the Google Cloud Storage bucket.
     Args:
         bucket_name (str): The name of the GCS bucket.
         source_blob_name (str): The source path in the GCS bucket.
-        credentials_path (str): Path to the GCS credentials JSON file.
     Returns:
         pd.DataFrame: The loaded DataFrame.
     """
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-    client = storage.Client()
+    client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(source_blob_name)
 
@@ -60,7 +57,7 @@ def load_from_gcs(bucket_name:str, source_blob_name:str, credentials_path:str) -
     
     return df
 
-def blob_exists(bucket_name:str, blob_name:str, credentials_path:str) -> bool:
+def blob_exists(bucket_name:str, blob_name:str) -> bool:
     """
     Checks if a file or directory exists in the Google Cloud Storage bucket.
     Args:
@@ -70,8 +67,7 @@ def blob_exists(bucket_name:str, blob_name:str, credentials_path:str) -> bool:
     Returns:
         bool: True if the file exists, False otherwise.
     """
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-    client = storage.Client()
+    client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     
