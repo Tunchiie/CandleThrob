@@ -134,9 +134,8 @@ class DataIngestion:
             self.ticker_df = self.ticker_df.copy()
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
-            logger.error("No stock data was fetched. Please check your internet connection or ticker symbols.")
-            raise ValueError("No stock data was fetched. Please check your internet connection or ticker symbols.")
-        
+            logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", self.all_tickers)
+
     def enrich_data(self):
         """ 
         Enrich the ticker data with additional information such as market cap, sector, and industry.
