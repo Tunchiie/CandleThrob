@@ -10,7 +10,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 logging.basicConfig(
-    filename="debug.log",
+    filename="ingestion/debug.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )

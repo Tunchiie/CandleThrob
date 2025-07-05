@@ -1,9 +1,6 @@
 name: Run Daily Ingestion
 
 on:
-    push:
-        branches:
-            - main
 
     schedule:
         - cron: '0 3 * * *' # Run daily at 3 AM UTC
@@ -52,11 +49,11 @@ jobs:
 
             - name: Set Up Google Cloud Credentials
               run: |
-                echo "${{ secrets.GCS_KEY_BASE64 }}" | base64 --decode > ${{ github.workspace }}/gcs-key.json
-                echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/gcs-key.json" >> $GITHUB_ENV
+                echo "${{ secrets.GCS_KEY_BASE64 }}" | base64 --decode > ${{ github.workspace }}/gcs_key.json
+                echo "GOOGLE_APPLICATION_CREDENTIALS=${{ github.workspace }}/gcs_key.json" >> $GITHUB_ENV
             - name: Run Ingestion Script
               env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs-key.json
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               working-directory: ${{ github.workspace }}
               run: |
@@ -64,7 +61,7 @@ jobs:
 
             - name: upload debug.log to GCS
               env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs-key.json
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs_key.json
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
                 if [ -f debug.log ]; then

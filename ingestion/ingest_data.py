@@ -35,6 +35,7 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
             bucket_name="candlethrob-candata",
             source_blob_name=f"{path}/{ticker}.parquet",
         )
+    
     if df is None or df.empty:
         logger.warning("No existing data found for %s, fetching new data.", ticker)
         start = "2000-01-01"
@@ -46,18 +47,18 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
     data = DataIngestion(start_date=start, end_date=end)
-    data.ingest_ticker_data(ticker)
-    if df is not None and not df.empty and data.ticker_df is not None and not data.ticker_df.empty:
-        data.ticker_df = pd.concat([df, data.ticker_df], ignore_index=True)
+    ticker_df = data.ingest_ticker_data(ticker)
+    if df is not None and not df.empty and ticker_df is not None and not ticker_df.empty:
+        ticker_df = pd.concat([df, ticker_df], ignore_index=True)
     else:
         logger.info("No existing data found for %s, using new data only.", ticker)
-        if data.ticker_df is None or data.ticker_df.empty:
+        if ticker_df is None or ticker_df.empty:
             logger.warning("No data was fetched for %s. Please check the ticker symbol or your internet connection.", ticker)
             return
-        
+    
     logger.info("Saving transformed ticker data to %s", filepath)
     upload_to_gcs(
-        data=data.ticker_df,
+        data=ticker_df,
         bucket_name="candlethrob-candata",
         destination_blob_name=f"{path}/{ticker}.parquet",
     )

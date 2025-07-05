@@ -13,6 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 credentials, project_id = google.auth.default()
 logger.info("Credentials and project_id loaded: %s", project_id)
+print(f"Credentials and project_id loaded: {project_id}")
 
 def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str):
     """
@@ -22,7 +23,6 @@ def upload_to_gcs(bucket_name:str, data:pd.DataFrame, destination_blob_name:str)
         data (pd.DataFrame): The DataFrame to upload.
         destination_blob_name (str): The destination path in the GCS bucket.
     """
-    print(f"Credentials and project_id loaded: {project_id}")
 
     client = storage.Client(credentials=credentials, project=project_id)
     bucket = client.bucket(bucket_name)
