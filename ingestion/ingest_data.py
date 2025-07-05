@@ -6,8 +6,6 @@ import logging
 from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ingestion.fetch_data import DataIngestion
-from ingestion.enrich_data import TechnicalIndicators
-from ingestion.enrich_data import EnrichMacros
 from utils.gcs import upload_to_gcs, load_from_gcs, blob_exists
 
 
