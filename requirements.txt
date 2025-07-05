@@ -35,7 +35,7 @@ filelock==3.13.1
 fonttools==4.58.1
 fqdn==1.5.1
 fredapi==0.4.0
-frozendict==2.3.0
+frozendict>=2.3.4
 frozenlist==1.7.0
 fsspec==2025.5.1
 gcsfs==2025.5.1
