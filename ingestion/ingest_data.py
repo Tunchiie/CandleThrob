@@ -25,7 +25,8 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
 
     Args:
         ticker (str): The stock ticker symbol.
-        path (str): The directory path where the ticker data is stored."""
+        path (str): The directory path where the ticker data is stored.
+    """
     filepath = f"{path}/{ticker}.parquet"
     df = None
     if blob_exists(bucket_name="candlethrob-candata", blob_name=f"{path}/{ticker}.parquet"):
@@ -122,8 +123,10 @@ def main():
     logger.info("Starting data ingestion and enrichment process...")
     # Update ticker data for S&P 500 and ETFs
     for sp500_ticker in get_sp500_tickers():
+        print(f"Updating data for S&P 500 ticker: {sp500_ticker}")
         update_ticker_data(sp500_ticker)
     for etf_ticker in get_etf_tickers():
+        print(f"Updating data for ETF ticker: {etf_ticker}")
         update_ticker_data(etf_ticker, path="raw/etfs")
     update_macro_data(filepath="raw/macros/macro_data.parquet")
     logger.info("Data ingestion and enrichment completed successfully.")

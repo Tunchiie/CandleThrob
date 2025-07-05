@@ -133,7 +133,7 @@ class DataIngestion:
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
             logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", tickers)
-            raise ValueError("No stock data was fetched. Please check your internet connection or ticker symbols.")
+            raise ValueError(f"No stock data was fetched for {tickers}. Please check your internet connection or ticker symbols.")
 
     def fetch_fred_data(self):
         """ 
