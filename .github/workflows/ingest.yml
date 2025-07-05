@@ -26,7 +26,7 @@ jobs:
                 sudo make install
                 cd ..
                 rm -rf ta-lib-0.4.0-src.tar.gz
-                pip inatall ta-lib
+                pip install ta-lib
                 pip install requirements.txt
           
             - name: Set Up Google Cloud Credentials
