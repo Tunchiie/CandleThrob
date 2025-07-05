@@ -21,6 +21,32 @@ jobs:
                 wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
                 sudo apt-get install -y -f
+
+            - name: Upgrade pip, setuptools, and wheel
+              run: |
+                pip install --upgrade pip setuptools wheel
+
+            - name: Install Python Dependencies
+              run: |
+                pip install ta-lib pandas yfinance lxml
+                pip install -r requirements.txt
+                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
+                if [ ! -f ta-lib_0.6.4_amd64.deb ]; then
+                  wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
+                fi
+                sudo dpkg -i ta-lib_0.6.4_amd64.deb
+                sudo apt-get install -y -f
+
+            - name: Cache Python dependencies
+              uses: actions/cache@v4
+              with:
+                path: ~/.cache/pip
+                key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+                restore-keys: |
+                  ${{ runner.os }}-pip-
+
+            - name: Install Python dependencies
+              run: |
                 pip install --upgrade pip setuptools wheel
                 pip install ta-lib pandas yfinance lxml
                 pip install -r requirements.txt
@@ -28,13 +54,13 @@ jobs:
 
             - name: Set Up Google Cloud Credentials
               run: |
-                echo "${{ secrets.GCS_KEY }}" >> $GITHUB_ENV
-                echo "FRED_API_KEY=${{ secrets.FRED_API_KEY }}" >> gcs-key.json
+                echo "${{ secrets.GCS_KEY }}" >> gcs-key.json
                 export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcs-key.json
-
+                echo "GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcs-key.json" >> $GITHUB_ENV
             - name: Run Ingestion Script
               env:
-                GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+                GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/gcs-key.json
+                FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               working-directory: ${{ github.workspace }}
               run: |
                 python ingestion/ingest_data.py
@@ -42,6 +68,7 @@ jobs:
             - name: upload debug.log to GCS
               env:
                 GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+                FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
               run: |
                 if [ -f debug.log ]; then
                   gsutil cp debug.log gs://candlethrob-candata/logs/ingestion/debug.log
