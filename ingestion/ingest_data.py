@@ -37,6 +37,7 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
     if df is None or df.empty:
         logger.warning("No existing data found for %s, fetching new data.", ticker)
         start = "2020-01-01"
+        end = datetime.now().strftime("%Y-%m-%d")
     else:
         # Get the last date in the existing data to determine the start date for new data
         start = df["Date"].max().strftime("%Y-%m-%d")
