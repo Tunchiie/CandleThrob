@@ -34,13 +34,13 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
             bucket_name="candlethrob-candata",
             source_blob_name=f"{path}/{ticker}.parquet",
         )
-        if df.empty:
-            logger.warning("No existing data found for %s, fetching new data.", ticker)
-            start = "2020-01-01"
-        else:
-            # Get the last date in the existing data to determine the start date for new data
-            start = df["Date"].max().strftime("%Y-%m-%d")
-            end = datetime.now().strftime("%Y-%m-%d")
+    if df is None or df.empty:
+        logger.warning("No existing data found for %s, fetching new data.", ticker)
+        start = "2020-01-01"
+    else:
+        # Get the last date in the existing data to determine the start date for new data
+        start = df["Date"].max().strftime("%Y-%m-%d")
+        end = datetime.now().strftime("%Y-%m-%d")
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
     data = DataIngestion(start_date=start, end_date=end)

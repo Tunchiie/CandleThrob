@@ -1,5 +1,8 @@
 import pandas as pd
 import logging
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.gcs import upload_to_gcs, load_from_gcs
 from ingestion.enrich_data import TechnicalIndicators, EnrichMacros
 from utils.gcs import upload_to_gcs, load_from_gcs, blob_exists, load_all_gcs_data
