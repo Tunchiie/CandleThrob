@@ -18,19 +18,12 @@ jobs:
               run: |
                 sudo apt-get update
                 sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
-                wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-                tar -xzf ta-lib-0.4.0-src.tar.gz
-                cd ta-lib
-                ./configure --prefix=/usr
-                make
-                sudo make install
-                cd ..
-                rm -rf ta-lib-0.4.0-src.tar.gz
-                export CFLAGS="-I/usr/local/include"
-                export LDFLAGS="-L/usr/local/lib"
+                wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
+                sudo dpkg -i ta-lib_0.6.4_amd64.deb
+                sudo apt-get install -y -f
                 pip install ta-lib
-                pip install requirements.txt
-          
+                pip install -r requirements.txt
+
             - name: Set Up Google Cloud Credentials
               id: auth
               uses: google-github-actions/auth@v0
