@@ -46,7 +46,7 @@ def update_ticker_data(ticker: str, path: str="raw/tickers"):
 
     logger.info("Updating ticker data for %s from %s to %s", ticker, start, end)
     data = DataIngestion(start_date=start, end_date=end)
-    data.fetch(tickers=ticker)
+    data.fetch(ticker)
     if df is not None and not df.empty and data.ticker_df is not None and not data.ticker_df.empty:
         data.ticker_df = pd.concat([df, data.ticker_df], ignore_index=True)
     else:
@@ -123,7 +123,6 @@ def main():
     logger.info("Starting data ingestion and enrichment process...")
     # Update ticker data for S&P 500 and ETFs
     for sp500_ticker in get_sp500_tickers():
-        print(f"Updating data for S&P 500 ticker: {sp500_ticker}")
         update_ticker_data(sp500_ticker)
     for etf_ticker in get_etf_tickers():
         print(f"Updating data for ETF ticker: {etf_ticker}")

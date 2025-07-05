@@ -42,7 +42,7 @@ class DataIngestion:
             raise ValueError("Start date cannot be after end date. Please check the dates provided.")
         logger.info("DataIngestion initialized with start date: %s and end date: %s", self.start_date, self.end_date)
     
-    def fetch(self, tickers=None):
+    def fetch(self, ticker=None):
         """ 
         Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
         This method downloads historical stock data for each ticker using yfinance, enriches the data with additional information,
@@ -52,7 +52,7 @@ class DataIngestion:
         """
         logger.info("Starting data ingestion process...")
         logger.info("Fetching data from %s to %s", self.start_date, self.end_date)
-        self.ingest_tickers(tickers)
+        self.ingest_ticker_data(ticker)
         logger.info("Data ingestion process completed.")
     
     @staticmethod
