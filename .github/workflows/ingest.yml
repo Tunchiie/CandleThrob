@@ -55,7 +55,6 @@ jobs:
             - name: Set Up Google Cloud Credentials
               run: |
                 echo "${{ secrets.GCS_KEY }}" >> gcs-key.json
-                export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcs-key.json
                 echo "GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/gcs-key.json" >> $GITHUB_ENV
             - name: Run Ingestion Script
               env:
