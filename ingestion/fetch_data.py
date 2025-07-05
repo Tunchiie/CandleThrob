@@ -111,8 +111,6 @@ class DataIngestion:
         Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
         Returns:
             None: The method updates the ticker DataFrame in place with historical stock data for all tickers.
-        Raises:
-            ValueError: If no stock data was fetched.
         """
         
         stock_data = []
@@ -133,7 +131,7 @@ class DataIngestion:
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
             logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", tickers)
-            raise ValueError(f"No stock data was fetched for {tickers}. Please check your internet connection or ticker symbols.")
+            return None
 
     def fetch_fred_data(self):
         """ 
