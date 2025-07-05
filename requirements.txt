@@ -174,5 +174,4 @@ websocket-client==1.8.0
 websockets==12.0
 wheel==0.43.0
 yarl==1.20.1
-yfinance==0.2.40
 zstandard==0.22.0

@@ -2,11 +2,10 @@ import logging
 import time
 import re
 import os
-import time
-import yfinance as yf
+import requests
 import pandas as pd
 from fredapi import Fred
-from datetime import datetime
+from datetime import datetime, timedelta
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -15,6 +14,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
 
 class DataIngestion:
     """
@@ -54,60 +55,123 @@ class DataIngestion:
     
     def ingest_ticker_data(self, ticker) -> pd.DataFrame:
         """ 
-        Ingest historical stock data for a given ticker using yfinance.
+        Ingest historical stock data for a given ticker using Polygon.io API.
         Args:
             ticker (str): The ticker symbol to fetch data for.
         Returns:
             pd.DataFrame: A DataFrame containing historical stock data for the ticker.
         """
         logger.info("Fetching data for %s from %s to %s", ticker, self.start_date, self.end_date)
-        retries = 3
+        
         if not ticker or ticker.strip() == "":
             logger.warning("Ticker is empty. Skipping.")
-            return None
+            return pd.DataFrame()
         
-        while retries > 0:
-            try:
-                print(f"Fetching {ticker} from {self.start_date} to {self.end_date}")
-                print(f"As strings: {self.start_date.strftime('%Y-%m-%d')} to {self.end_date.strftime('%Y-%m-%d')}")
+        # Use Polygon.io as primary data source
+        price_history = self._fetch_polygon_data(ticker)
+        
+        if price_history is None or price_history.empty:
+            logger.error("Failed to fetch data for %s from Polygon.io", ticker)
+            return pd.DataFrame()
+            
+        return price_history
 
-                price_history = yf.download(ticker, start=self.start_date.strftime("%Y-%m-%d"), end=self.end_date.strftime("%Y-%m-%d"), group_by='Ticker', auto_adjust=True)
-                if price_history.empty:
-                    logger.warning("No data found for %s. Skipping.", ticker)
-                    return None
+    def _fetch_polygon_data(self, ticker):
+        """Fetch OHLCV data using Polygon.io API."""
+        try:
+            api_key = os.getenv("POLYGON_API_KEY")
+            if not api_key:
+                logger.error("Polygon.io API key not found. Please set POLYGON_API_KEY environment variable.")
+                return pd.DataFrame()
+            
+            # Format dates for Polygon API
+            from_date = self.start_date.strftime("%Y-%m-%d")
+            to_date = self.end_date.strftime("%Y-%m-%d")
+            
+            # Polygon.io aggregates endpoint
+            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
+            params = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 50000,  # Max limit for free tier
+                "apikey": api_key
+            }
+            
+            logger.info("Fetching Polygon.io OHLCV data for %s", ticker)
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("status") != "OK":
+                logger.warning("Polygon.io API error for %s: %s", ticker, data.get("message", "Unknown error"))
+                return pd.DataFrame()
+            
+            if "results" not in data or not data["results"]:
+                logger.warning("No Polygon.io data found for %s", ticker)
+                return pd.DataFrame()
+            
+            # Convert to DataFrame
+            df_data = []
+            for bar in data["results"]:
+                # Polygon returns timestamp in milliseconds
+                date_obj = datetime.fromtimestamp(bar["t"] / 1000)
                 
-                price_history = price_history.stack(level="Ticker", future_stack=True).reset_index(level="Ticker")
-                price_history['Ticker'] = ticker
-                price_history['Year'] = price_history.index.year
-                price_history['Month'] = price_history.index.month
-                price_history['Weekday'] = price_history.index.weekday
-                price_history.columns = [col for col in price_history.columns]
-                price_history.columns.name = None
-                price_history.reset_index(inplace=True)
-                logger.info("Successfully fetched data for %s.", ticker)
-                return price_history
-            except Exception as e:
-                logger.error("Error fetching data for %s: %s", ticker, e)
-                time.sleep(5 * retries)  # Wait before retrying
-                retries -= 1
-        logger.error("Failed to fetch data for %s after multiple retries.", ticker)
-        return None
+                df_data.append({
+                    "Date": date_obj.date(),
+                    "Open": float(bar["o"]),
+                    "High": float(bar["h"]),
+                    "Low": float(bar["l"]),
+                    "Close": float(bar["c"]),
+                    "Volume": int(bar["v"]),
+                    "Ticker": ticker,
+                    "Year": date_obj.year,
+                    "Month": date_obj.month,
+                    "Weekday": date_obj.weekday()
+                })
+            
+            if df_data:
+                df = pd.DataFrame(df_data)
+                df['Date'] = pd.to_datetime(df['Date'])
+                df.sort_values("Date", inplace=True)
+                df.reset_index(drop=True, inplace=True)
+                logger.info("Successfully fetched Polygon.io OHLCV data for %s (%d days)", ticker, len(df))
+                return df
+                
+        except requests.RequestException as e:
+            logger.error("Polygon.io request error for %s: %s", ticker, str(e))
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error("Polygon.io data parsing error for %s: %s", ticker, str(e))
+        except Exception as e:
+            logger.error("Unexpected error fetching Polygon.io data for %s: %s", ticker, str(e))
+        
+        return pd.DataFrame()
 
     def ingest_tickers(self, tickers=None):
         """ 
-        Fetch the list of tickers from the S&P 500 and ETFs, clean them, and store them in a list.
+        Fetch historical OHLCV stock data for a list of tickers using Polygon.io.
+        Handles rate limiting (5 calls per minute for free tier).
         Returns:
             None: The method updates the ticker DataFrame in place with historical stock data for all tickers.
         """
         
+        if not tickers:
+            logger.error("No tickers provided")
+            return None
+            
         stock_data = []
-        # Download stock data from yfinance
-        tq = tqdm(tickers, desc="Downloading")
-        for _, ticker in enumerate(tq):
+        # Rate limiting: 5 calls per minute = 12 seconds between calls
+        rate_limit_delay = 12  # seconds between API calls
+        
+        tq = tqdm(tickers, desc="Downloading OHLCV from Polygon.io")
+        for i, ticker in enumerate(tq):
             ticker_df = self.ingest_ticker_data(ticker)
             if ticker_df is not None and not ticker_df.empty:
                 stock_data.append(ticker_df)
-            time.sleep(1.5)
+            
+            # Rate limiting: wait between API calls (except for the last one)
+            if i < len(tickers) - 1:
+                logger.info("Rate limiting: waiting %d seconds before next API call", rate_limit_delay)
+                time.sleep(rate_limit_delay)
                 
         if stock_data:
             stock_data = [df for df in stock_data if df is not None and not df.empty]
@@ -117,7 +181,7 @@ class DataIngestion:
             self.ticker_df = self.ticker_df.copy()
             logger.info("Fetched data for %d tickers.", len(self.ticker_df['Ticker'].unique()))
         else:
-            logger.error("No stock data was fetched for %s. Please check your internet connection or ticker symbols.", tickers)
+            logger.error("No stock data was fetched for %s. Please check your internet connection or API key.", tickers)
             return None
 
     def fetch_fred_data(self):

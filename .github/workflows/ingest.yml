@@ -26,25 +26,8 @@ jobs:
                 path: ~/.cache/pip
                 key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
 
-            - name: Cache TA-Lib binary
-              uses: actions/cache@v4
-              with:
-                path: ta-lib_0.6.4_amd64.deb
-                key: ta-lib-0.6.4-amd64
-
-            - name: Download and Install System Dependencies and TA-Lib
-              run: |
-                sudo apt-get update
-                sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
-                if [ ! -f ta-lib_0.6.4_amd64.deb ]; then
-                  wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
-                fi
-                sudo dpkg -i ta-lib_0.6.4_amd64.deb
-                sudo apt-get install -y -f
-
             - name: Install Python Dependencies
               run: |
-                pip install ta-lib
                 pip install -r requirements.txt
           
 
@@ -63,6 +46,7 @@ jobs:
             - name: Run Ingestion Script
               env:
                 FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+                POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
               working-directory: ${{ github.workspace }}
               run: |
                 python ingestion/ingest_data.py
