@@ -33,7 +33,7 @@ jobs:
                 if [ ! -f ta-lib_0.6.4_amd64.deb ]; then
                   wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
                 fi
-                udo apt-get install -y -f
+                sudo apt-get install -y -f
                 sudo apt-get install -y build-essential wget libtool autoconf automake pkg-config python3-dev libffi-dev
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
                 pip install ta-lib pandas yfinance lxml
