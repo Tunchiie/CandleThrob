@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from ingestion.enrich_macros import EnrichMacros
+from ingestion.transform_data import EnrichMacros
 
 """
     The code contains multiple test functions for enriching and transforming macroeconomic data using

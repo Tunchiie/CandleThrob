@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ingestion.fetch_data import DataIngestion
-from ingestion.enrich_tickers import TechnicalIndicators
+from ingestion.transform_data import TechnicalIndicators
 import pandas as pd
 
 """
