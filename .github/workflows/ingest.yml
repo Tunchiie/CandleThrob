@@ -21,8 +21,7 @@ jobs:
                 wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
                 sudo dpkg -i ta-lib_0.6.4_amd64.deb
                 sudo apt-get install -y -f
-                pip install ta-lib
-                pip install pandas
+                pip install ta-lib pandas
                 pip install -r requirements.txt
 
             - name: Set Up Google Cloud Credentials
