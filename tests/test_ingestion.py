@@ -17,12 +17,9 @@ def sample_data_ingestion():
     return DataIngestion(start_date="2024-01-01", end_date="2024-01-05")
 
 @pytest.fixture
-def db_session():
-    """Create a database session for testing."""
-    db = OracleDB()
-    session = db.get_oracledb_session()
-    yield session
-    db.close_oracledb_session()
+def db():
+    """Create a database connection for testing."""
+    return OracleDB()
 
 def test_data_ingestion_initialization():
     """Test DataIngestion class initialization."""
@@ -94,87 +91,86 @@ def test_get_sp500_tickers():
         # Skip test if web scraping fails (network issues, etc.)
         pytest.skip("S&P 500 ticker fetching failed - likely network issue")
 
-def test_database_connection(db_session):
+def test_database_connection(db):
     """Test database connection and basic operations."""
-    from sqlalchemy import text
-    
-    # Test basic query
-    result = db_session.execute(text("SELECT 1 as test_col"))
-    row = result.fetchone()
-    assert row[0] == 1
+    with db.get_oracledb_session() as session:
+        from sqlalchemy import text
+        
+        # Test basic query
+        result = session.execute(text("SELECT 1 as test_col"))
+        row = result.fetchone()
+        assert row[0] == 1
 
-def test_ticker_data_table_creation(db_session):
+def test_ticker_data_table_creation(db):
     """Test TickerData table creation."""
-    ticker_data = TickerData()
-    ticker_data.create_table(db_session)
-    
-    # Verify table exists by attempting to query it
-    from sqlalchemy import text
-    try:
-        result = db_session.execute(text("SELECT COUNT(*) FROM raw_ticker_data"))
-        count = result.fetchone()[0]
-        assert count >= 0  # Should return 0 or more rows
-    except Exception as e:
-        pytest.fail(f"TickerData table creation failed: {e}")
+    with db.get_oracledb_session() as session:
+        ticker_data = TickerData()
+        ticker_data.create_table(session)
+        
+        # Verify table exists by attempting to query it
+        from sqlalchemy import text
+        try:
+            result = session.execute(text("SELECT COUNT(*) FROM ticker_data"))
+            count = result.fetchone()[0]
+            assert count >= 0  # Should return 0 or more rows
+        except Exception as e:
+            pytest.fail(f"TickerData table creation failed: {e}")
 
-def test_macro_data_table_creation(db_session):
+def test_macro_data_table_creation(db):
     """Test MacroData table creation."""
-    macro_data = MacroData()
-    macro_data.create_table(db_session)
-    
-    # Verify table exists by attempting to query it  
-    from sqlalchemy import text
-    try:
-        result = db_session.execute(text("SELECT COUNT(*) FROM raw_macro_data"))
-        count = result.fetchone()[0]
-        assert count >= 0  # Should return 0 or more rows
-    except Exception as e:
-        pytest.fail(f"MacroData table creation failed: {e}")
+    with db.get_oracledb_session() as session:
+        macro_data = MacroData()
+        macro_data.create_table(session)
+        
+        # Verify table exists by attempting to query it  
+        from sqlalchemy import text
+        try:
+            result = session.execute(text("SELECT COUNT(*) FROM macro_data"))
+            count = result.fetchone()[0]
+            assert count >= 0  # Should return 0 or more rows
+        except Exception as e:
+            pytest.fail(f"MacroData table creation failed: {e}")
 
-def test_data_insertion_ticker(db_session):
+def test_data_insertion_ticker(db):
     """Test inserting ticker data into database."""
-    ticker_data = TickerData()
-    ticker_data.create_table(db_session)
-    
-    # Create sample data
-    sample_data = {
-        'date': pd.to_datetime('2024-01-01').date(),
-        'ticker': 'TEST',
-        'open': 100.0,
-        'high': 105.0,
-        'low': 95.0,
-        'close': 102.0,
-        'volume': 1000000,
-        'year': 2024,
-        'month': 1,
-        'weekday': 0
-    }
-    
-    try:
-        ticker_data.insert_data(db_session, sample_data)
-        # If no exception is raised, insertion was successful
-        assert True
-    except Exception as e:
-        pytest.fail(f"Ticker data insertion failed: {e}")
+    with db.get_oracledb_session() as session:
+        ticker_data = TickerData()
+        ticker_data.create_table(session)
+        
+        # Create sample DataFrame
+        sample_df = pd.DataFrame({
+            'date': [pd.to_datetime('2024-01-01')],
+            'ticker': ['TEST'],
+            'open': [100.0],
+            'high': [105.0],
+            'low': [95.0],
+            'close': [102.0],
+            'volume': [1000000]
+        })
+        
+        try:
+            ticker_data.insert_data(session, sample_df)
+            # If no exception is raised, insertion was successful
+            assert True
+        except Exception as e:
+            pytest.fail(f"Ticker data insertion failed: {e}")
 
-def test_data_insertion_macro(db_session):
+def test_data_insertion_macro(db):
     """Test inserting macro data into database."""
-    macro_data = MacroData()
-    macro_data.create_table(db_session)
-    
-    # Create sample data
-    sample_data = {
-        'date': pd.to_datetime('2024-01-01').date(),
-        'indicator_name': 'TEST_INDICATOR',
-        'value': 1.5,
-        'year': 2024,
-        'month': 1,
-        'weekday': 0
-    }
-    
-    try:
-        macro_data.insert_data(db_session, sample_data)
-        # If no exception is raised, insertion was successful
-        assert True
-    except Exception as e:
-        pytest.fail(f"Macro data insertion failed: {e}")
+    with db.get_oracledb_session() as session:
+        macro_data = MacroData()
+        macro_data.create_table(session)
+        
+        # Create sample DataFrame
+        sample_df = pd.DataFrame({
+            'date': [pd.to_datetime('2024-01-01')],
+            'series_id': ['TEST_INDICATOR'],
+            'value': [1.5]
+        })
+        
+        try:
+            macro_data.insert_data(session, sample_df)
+            # If no exception is raised, insertion was successful
+            assert True
+        except Exception as e:
+            pytest.fail(f"Macro data insertion failed: {e}")
