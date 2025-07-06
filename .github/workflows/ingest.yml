@@ -1,9 +1,7 @@
 name: Run Daily Ingestion and Transformation
 
 on:
-    push:
-        branches:
-            - main
+
     schedule:
         # Start ingestion at 9 PM EST (2 AM UTC during EST, 1 AM UTC during EDT)
         # Using 2 AM UTC year-round to be conservative for EST
@@ -28,7 +26,6 @@ on:
         - cron: '30 6 * * *'  # Batch 18 at 6:30 AM UTC
         - cron: '45 6 * * *'  # Batch 19 at 6:45 AM UTC
         - cron: '0 7 * * *'   # Batch 20 at 7:00 AM UTC
-        - cron: '15 7 * * *'  # Batch 21 at 7:15 AM UTC
 
 jobs:
     ingest:
@@ -126,11 +123,7 @@ jobs:
                     echo "batch_number=19" >> $GITHUB_OUTPUT
                   fi
                 elif [ "$current_hour" = "07" ]; then
-                  if [ "$current_minute" -lt "15" ]; then
-                    echo "batch_number=20" >> $GITHUB_OUTPUT
-                  else
-                    echo "batch_number=21" >> $GITHUB_OUTPUT
-                  fi
+                  echo "batch_number=20" >> $GITHUB_OUTPUT
                 else
                   echo "batch_number=0" >> $GITHUB_OUTPUT
                 fi

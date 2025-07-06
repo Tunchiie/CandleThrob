@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from tqdm import tqdm
 
 logging.basicConfig(
-    filename="ingestion/debug.log",
+    filename="ingestion/ingest_debug.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -104,7 +104,7 @@ class DataIngestion:
             params = {
                 "adjusted": "true",
                 "sort": "asc",
-                "limit": 50000,  # Max limit for free tier
+                "limit": 50000, 
                 "apikey": api_key
             }
             
@@ -128,22 +128,19 @@ class DataIngestion:
                 date_obj = datetime.fromtimestamp(bar["t"] / 1000)
                 
                 df_data.append({
-                    "Date": date_obj.date(),
-                    "Open": float(bar["o"]),
-                    "High": float(bar["h"]),
-                    "Low": float(bar["l"]),
-                    "Close": float(bar["c"]),
-                    "Volume": int(bar["v"]),
-                    "Ticker": ticker,
-                    "Year": date_obj.year,
-                    "Month": date_obj.month,
-                    "Weekday": date_obj.weekday()
+                    "date": date_obj.date(),
+                    "open": float(bar["o"]),
+                    "high": float(bar["h"]),
+                    "low": float(bar["l"]),
+                    "close": float(bar["c"]),
+                    "volume": int(bar["v"]),
+                    "ticker": ticker
                 })
             
             if df_data:
                 df = pd.DataFrame(df_data)
-                df['Date'] = pd.to_datetime(df['Date'])
-                df.sort_values("Date", inplace=True)
+                df['date'] = pd.to_datetime(df['date'])
+                df.sort_values("date", inplace=True)
                 df.reset_index(drop=True, inplace=True)
                 logger.info("Successfully fetched Polygon.io OHLCV data for %s (%d days)", ticker, len(df))
                 return df
@@ -194,13 +191,22 @@ class DataIngestion:
             stock_data = [df for df in stock_data if df is not None and not df.empty]
             self.ticker_df = pd.concat(stock_data, ignore_index=True)
             self.ticker_df.sort_index(inplace=True)
-            self.ticker_df['Date'] = pd.to_datetime(self.ticker_df['Date'])
+            self.ticker_df['date'] = pd.to_datetime(self.ticker_df['date'])
             self.ticker_df = self.ticker_df.copy()
-            logger.info("Fetched data for %d tickers using Polygon.io API.", 
-                       len(self.ticker_df['Ticker'].unique()))
+            logger.info("Fetched data for %d tickers using Polygon.io API.",
+                       len(self.ticker_df['ticker'].unique()))
         else:
             logger.error("No stock data was fetched for %s. Please check your internet connection or Polygon.io API key.", tickers)
             return None
+
+    def fetch(self, tickers=None):
+        """
+        Backward compatibility method for ingest_tickers.
+        
+        Args:
+            tickers (list): A list of ticker symbols to fetch data for.
+        """
+        return self.ingest_tickers(tickers)
 
     def fetch_fred_data(self):
         """ 
@@ -244,11 +250,17 @@ class DataIngestion:
 
         fred_df.index = pd.to_datetime(fred_df.index)
         fred_df = fred_df.resample('D').mean().ffill().bfill()
-        fred_df.reset_index(names='Date', inplace=True)
-        fred_df['Date'] = fred_df['Date'].dt.normalize()
+        fred_df.reset_index(names='date', inplace=True)
+        fred_df['date'] = fred_df['date'].dt.normalize()
+        
+        # Transform to long format for MacroData model
+        melted_df = pd.melt(fred_df, id_vars=['date'], var_name='series_id', value_name='value')
+        melted_df = melted_df.dropna(subset=['value'])  # Remove rows with NaN values
+        
+        # Don't add year, month, weekday - they're not in the current models
 
         if self.macro_df is not None and not self.macro_df.empty:
-            self.macro_df = self.macro_df.merge(fred_df, on='Date', how='left')
+            self.macro_df = pd.concat([self.macro_df, melted_df], ignore_index=True)
         else:
-            self.macro_df = fred_df        
+            self.macro_df = melted_df        
         logger.info("FRED data fetched and stored successfully.")

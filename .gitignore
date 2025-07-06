@@ -40,3 +40,7 @@ Thumbs.db
 
 # Jupyter notebook metadata (optional, but helps sometimes)
 notebooks/candlethrob_dataset.csv
+
+# GitHub workflows
+/.github/workflows/
+.github/workflows/*

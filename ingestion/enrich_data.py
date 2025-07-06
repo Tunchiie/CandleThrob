@@ -1,17 +1,22 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import talib
 import pandas as pd
 import os
-from datetime import datetime
-from ingestion.fetch_data import DataIngestion
 import logging
 from tqdm import tqdm
-import yfinance as yf
+from datetime import datetime
+from ingestion.fetch_data import DataIngestion
+
+
+# Try to import talib, with fallback if not available
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: TA-Lib not available: {e}")
+    print("Please install TA-Lib C library first, then pip install TA-Lib")
+    TALIB_AVAILABLE = False
 
 logging.basicConfig(
-    filename="debug.log",
+    filename="ingestion/enrich_debug.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -41,43 +46,24 @@ class TechnicalIndicators:
         
     def enrich_tickers(self):
         """ 
-        Enrich the ticker data with additional information such as market cap, sector, and industry.
-        This method fetches data from yfinance and updates the ticker DataFrame with market cap, sector, and industry information.
-        It also calculates returns for various periods (1, 3, 7, 30, 90, and 365 days).
+        Enrich the ticker data with basic return calculations.
+        Note: Market cap, sector, and industry enrichment has been removed for Polygon-only strategy.
+        This method calculates returns for various periods (1, 3, 7, 30, 90, and 365 days).
         Returns:
-            None: The method updates the ticker DataFrame in place with additional columns for market cap,
+            None: The method updates the ticker DataFrame in place with additional return columns.
         """
-        # Fetch market cap, sector, and industry data from yfinance
-        logger.info("Enriching data with market cap, sector, and industry information...")
-        ticker_info = yf.Tickers(self.ticker_df['Ticker'].tolist()).tickers
-        metadata = []
+        logger.info("Enriching data with return calculations...")
         
-        for ticker in tqdm(ticker_info, desc="Enriching Data"):
-            info = ticker_info[ticker].info
-            metadata.append({
-                "Ticker": ticker,
-                "Market Cap": info.get("marketCap", None),
-                "Sector": info.get("sector", None),
-                "Industry": info.get("industry", None)
-            })
-            
-        metadata_df = pd.DataFrame(metadata)
-        if metadata_df.empty:
-            logger.error("No metadata was fetched. Please check your internet connection or ticker symbols.")
-            raise ValueError("No metadata was fetched. Please check your internet connection or ticker symbols.")
-
-        if self.ticker_df is None:
+        if self.ticker_df is None or self.ticker_df.empty:
             raise ValueError("Ticker DataFrame is empty. Please run ingest_tickers() first.")
         
-        self.ticker_df = self.ticker_df.merge(metadata_df, on="Ticker", how="left")
-        self.ticker_df["Market Cap"] = self.ticker_df["Market Cap"].fillna(0).astype(float)
-        self.ticker_df["Sector"] = self.ticker_df["Sector"].fillna("Unknown")
-        self.ticker_df["Industry"] = self.ticker_df["Industry"].fillna("Unknown")
-
-        for i in [1,3,7,30,90,365]:
+        # Calculate returns for various periods
+        for i in [1, 3, 7, 30, 90, 365]:
             self.ticker_df[f"Return_{i}d"] = self.ticker_df.groupby("Ticker")["Close"]\
                 .pct_change(periods=i).fillna(0)
+        
         self.ticker_df["Date"] = pd.to_datetime(self.ticker_df["Date"])
+        logger.info("Return calculations completed successfully.")
 
     def calculate_technical_indicators(self):
         """
@@ -86,6 +72,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with technical indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Cannot calculate technical indicators.")
+            raise ImportError("TA-Lib is required for technical indicators but is not installed.")
+            
         logger.info("Calculating technical indicators...")
         # Ensure the DataFrame has the necessary columns
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
@@ -204,11 +194,17 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with momentum indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 
+                                         'Stoch_K', 'Stoch_D', 'CCI', 'ROC', 
+                                         'MOM', 'TRIX', 'WILLR'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 
                                          'Stoch_K', 'Stoch_D', 'CCI', 'ROC', 
-                                         'MOM', 'MACD_Oscillator', 'TRIX', 'WILLR', 'MMACDFix'])
+                                         'MOM', 'TRIX', 'WILLR'])
             
         logger.info("Calculating TA-Lib indicators...")
         
@@ -282,6 +278,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with volume indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'OBV', 'AD', 'MFI', 'ADOSC', 'CMF', 'VWAP', 'VPT', 'ADX', 'RVOL'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'OBV', 'AD', 'ADOSC'])
@@ -394,6 +394,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with volatility indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'ATR', 'NATR', 'TRANGE', 'BBANDS_UPPER', 'BBANDS_MIDDLE', 'BBANDS_LOWER', 'ULCER_INDEX', 'DONCH_UPPER', 'DONCH_LOWER'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'ATR', 'NATR', 'TRANGE'])
@@ -436,6 +440,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with pattern indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'CDLDOJI', 'CDLHAMMER', 'CDLHANGINGMAN'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'CDLDOJI', 'CDLHAMMER', 'CDLHANGINGMAN'])
@@ -588,6 +596,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with price indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'Midprice', 'Medprice', 'Typprice', 'Wclprice', 'Avgprice'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'Price_Change', 'Price_Change_Percent'])
@@ -627,6 +639,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with cycle indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'HT_TRENDLINE', 'HT_SINE', 'HT_SINE_LEAD', 'HT_DCPERIOD', 'HT_DCPHASE'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'HT_TRENDLINE', 'HT_SINE', 'HT_DCPERIOD', 'HT_DCPHASE'])
@@ -664,6 +680,10 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame with statistical indicators added.
         """
+        if not TALIB_AVAILABLE:
+            logger.error("TA-Lib is not available. Returning empty DataFrame.")
+            return pd.DataFrame(columns=['Date', 'Ticker', 'STDDEV', 'VAR', 'BETA_VS_SP500', 'ZSCORE_PRICE_NORMALIZED'])
+            
         if df.empty:
             logger.warning("Input DataFrame is empty. Returning an empty DataFrame.")
             return pd.DataFrame(columns=['Date', 'Ticker', 'STDDEV', 'VAR'])
@@ -698,7 +718,7 @@ class TechnicalIndicators:
             df (pd.DataFrame): DataFrame to save.
             file_path (str): Path to the Parquet file.
         """
-        if self.transformed_df.empty:
+        if self.transformed_df is None or self.transformed_df.empty:
             logger.warning("DataFrame is empty. No data to save.")
             return
         if not os.path.exists(os.path.dirname(file_path)):
@@ -719,7 +739,10 @@ class EnrichMacros:
         This class fetches macroeconomic indicators from the FRED API and transforms them for further analysis.
         """
         logger.info("Initializing EnrichMacros with macroeconomic data.")
-        self.macro_df = macro_df[macro_df['Date'].dt.year >= 2000] if macro_df is not None else pd.DataFrame()
+        if macro_df is not None and not macro_df.empty and 'Date' in macro_df.columns:
+            self.macro_df = macro_df[macro_df['Date'].dt.year >= 2000]
+        else:
+            self.macro_df = pd.DataFrame()
         self.end_date = datetime.now()
         self.start_date = (datetime.now() - pd.DateOffset(years=50))
         self.transformed_df = None
@@ -736,11 +759,30 @@ class EnrichMacros:
         # Sort by date
         self.macro_df.sort_index(inplace=True)
         self.transformed_df = self.macro_df.copy()
-        # Rename columns to match FRED series names
-        self.lag_macro_data(['GDP', 'UNRATE', 'UMCSENT', 'CPIAUCSL'], lag_periods=[30, 60, 90])
-        self.rolling_macro_data(['FEDFUNDS', 'INDPRO'], window=[30, 90])
-        self.pct_change_macro_data(['GDP', 'UMCSENT', 'RSAFS'], periods=[90])
-        self.z_score_macro_data(['UNRATE', 'CPIAUCSL'], window=90)
+        
+        # Only apply transformations to columns that exist
+        available_cols = self.macro_df.columns.tolist()
+        
+        # Lag available columns
+        lag_cols = [col for col in ['GDP', 'UNRATE', 'UMCSENT', 'CPIAUCSL'] if col in available_cols]
+        if lag_cols:
+            self.lag_macro_data(lag_cols, lag_periods=[30, 60, 90])
+        
+        # Rolling mean for available columns  
+        rolling_cols = [col for col in ['FEDFUNDS', 'INDPRO'] if col in available_cols]
+        if rolling_cols:
+            self.rolling_macro_data(rolling_cols, window=[30, 90])
+        
+        # Percentage change for available columns
+        pct_cols = [col for col in ['GDP', 'UMCSENT', 'RSAFS'] if col in available_cols]
+        if pct_cols:
+            self.pct_change_macro_data(pct_cols, periods=[90])
+        
+        # Z-score for available columns
+        zscore_cols = [col for col in ['UNRATE', 'CPIAUCSL'] if col in available_cols]
+        if zscore_cols:
+            self.z_score_macro_data(zscore_cols, window=90)
+        
         logger.info("Transformed macroeconomic data to a consistent format.")
 
     def lag_macro_data(self, cols: list, lag_periods: list = [30, 60, 90]):
@@ -756,6 +798,9 @@ class EnrichMacros:
             return
 
         for col in cols:
+            if col not in self.macro_df.columns:
+                logger.warning("Column %s not found in macro DataFrame. Skipping.", col)
+                continue
             for period in lag_periods:
                 if period <= 0:
                     raise ValueError("Lag period must be a positive integer.")
