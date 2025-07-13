@@ -24,6 +24,7 @@ var.env
 gcs_key.json
 *.json
 /secrets/*
+/oracle_config/*
 
 # CSV/data exports (optional, depends on what you want versioned)
 data/*.csv

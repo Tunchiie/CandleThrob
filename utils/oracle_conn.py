@@ -1,16 +1,12 @@
 import os
 import oracledb
-import logging
 from contextlib import contextmanager
 from CandleThrob.utils.vault import get_secret
+from CandleThrob.utils.logging_config import get_database_logger, log_database_operation
 from sqlalchemy import create_engine
 
-logging.basicConfig(
-    filename="oracle_debug.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Get logger for this module
+logger = get_database_logger(__name__)
 
 oracledb.init_oracle_client(lib_dir="/opt/oracle/instantclient_23_8")
 
@@ -36,10 +32,10 @@ class OracleDB():
             # Create Oracle connection string for SQLAlchemy
             connection_string = f"oracle+oracledb://{ORACLE_USER}:{ORACLE_PASSWORD}@{ORACLE_DSN}"
             engine = create_engine(connection_string)
-            logger.info("SQLAlchemy engine created successfully")
+            log_database_operation("create_engine", "Oracle DB")
             return engine
         except Exception as e:
-            logger.error(f"Error creating SQLAlchemy engine: {e}")
+            log_database_operation("create_engine", "Oracle DB", error=str(e))
             raise
 
     @contextmanager
@@ -54,13 +50,14 @@ class OracleDB():
                 password=ORACLE_PASSWORD,
                 dsn=ORACLE_DSN
             )
+            log_database_operation("connect", "Oracle DB")
             yield self.conn
             
         except oracledb.DatabaseError as e:
-            logger.error(f"Database error: {e}")
+            log_database_operation("connect", "Oracle DB", error=str(e))
             raise
         except Exception as e:
-            logger.error(f"Error establishing connection: {e}")
+            log_database_operation("connect", "Oracle DB", error=str(e))
             raise
         finally:
             if self.conn:
@@ -81,5 +78,5 @@ class OracleDB():
             with conn.cursor() as cursor:
                 cursor.execute(query)
                 results = cursor.fetchall()
-                logger.info(f"Executed query: {query}")
+                log_database_operation("query", "Oracle DB", len(results))
                 return results

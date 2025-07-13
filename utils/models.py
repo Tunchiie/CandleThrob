@@ -8,14 +8,14 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
-import logging
 from datetime import datetime
 from datetime import date as date_type
 from typing import Optional
 from CandleThrob.utils.oracle_conn import OracleDB
+from CandleThrob.utils.logging_config import get_database_logger, log_database_operation
 
-
-logger = logging.getLogger(__name__)
+# Get logger for this module
+logger = get_database_logger(__name__)
 
 class TickerData():
     """Model for storing ticker data (OHLCV) with bulk insert and incremental loading support."""
@@ -48,9 +48,9 @@ class TickerData():
                         END IF;
                 END;
             """)
-            logger.info("TickerData table created/verified successfully")
+            log_database_operation("create_table", self.__tablename__)
         except Exception as e:
-            logger.error("Error creating TickerData table: %s", e)
+            log_database_operation("create_table", self.__tablename__, error=str(e))
             raise
 
     def data_exists(self, cursor, ticker: Optional[str] = None) -> bool:
@@ -114,12 +114,21 @@ class TickerData():
             with conn.begin() as transaction:
                 transaction.execute(text(insert_statement), current_data)
 
-            logger.info("Successfully inserted %d ticker records", len(df_clean))
+            log_database_operation("insert", self.__tablename__, len(df_clean))
             
         except Exception as e:
-            logger.error("Error inserting ticker data: %s", e)
+            log_database_operation("insert", self.__tablename__, error=str(e))
             raise
-
+    
+    def get_data(self, conn, ticker: Optional[str] = None) -> pd.DataFrame:
+        """Get data from the table."""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {self.__tablename__} WHERE ticker = :ticker", {"ticker": ticker})
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error("Error getting ticker data: %s", e)
+            raise 
 
 class MacroData():
     """Model for storing macroeconomic data with bulk insert and incremental loading support."""
@@ -146,9 +155,9 @@ class MacroData():
                         END IF;
                 END;
             """)
-            logger.info("MacroData table created/verified successfully")
+            log_database_operation("create_table", self.__tablename__)
         except Exception as e:
-            logger.error("Error creating MacroData table: %s", e)
+            log_database_operation("create_table", self.__tablename__, error=str(e))
             raise
     
     def data_exists(self, cursor, series_id: Optional[str] = None) -> bool:
@@ -216,6 +225,15 @@ class MacroData():
         except Exception as e:
             logger.error("Error inserting macro data: %s", e)
             raise
+    def get_data(self, conn, ticker: Optional[str] = None) -> pd.DataFrame:
+        """Get data from the table."""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {self.__tablename__} WHERE ticker = :ticker", {"ticker": ticker})
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error("Error getting macro data: %s", e)
+            raise 
 
 
 class TransformedTickers():
@@ -461,7 +479,16 @@ class TransformedTickers():
         except Exception as e:
             logger.error("Error inserting transformed data: %s", e)
             raise
-
+    
+    def get_data(self, conn, ticker: Optional[str] = None) -> pd.DataFrame:
+        """Get data from the table."""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {self.__tablename__} WHERE ticker = :ticker", {"ticker": ticker})
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error("Error getting transformed data: %s", e)
+            raise 
 
 class TransformedMacroData():
     """Model for storing transformed macroeconomic data."""
@@ -580,3 +607,13 @@ class TransformedMacroData():
         except Exception as e:
             logger.error("Error inserting transformed macro data: %s", e)
             raise
+    
+    def get_data(self, conn, series_id: Optional[str] = None) -> pd.DataFrame:
+        """Get data from the table."""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {self.__tablename__} WHERE series_id = :series_id", {"series_id": series_id})
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error("Error getting transformed macro data: %s", e)
+            raise 

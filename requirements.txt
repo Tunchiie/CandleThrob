@@ -120,3 +120,4 @@ zipp==3.23.0
 tqdm
 oci
 lxml
+pandas-ta

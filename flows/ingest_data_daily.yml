@@ -1,0 +1,76 @@
+id: ingest_data_daily
+namespace: candlethrob.ingestion
+
+tasks:
+  - id: start_daily_ingestion
+    type: io.kestra.plugin.core.log.Log
+    message: "Starting complete daily ingestion - processing all 523 tickers"
+
+  - id: process_all_batches
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"]
+    env:
+      BATCH_SIZE: "25"
+      POLYGON_RATE_LIMIT: "12"
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    timeout: PT4H
+    retry:
+      type: constant
+      maxAttempt: 3
+      interval: PT5M
+
+  - id: check_cycle_complete
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    command: ["sh", "-c", "if [ -f /app/data/batch_cycle_complete.flag ]; then echo 'COMPLETE'; else echo 'INCOMPLETE'; fi"]
+    timeout: PT1M
+    dependsOn:
+      - process_all_batches
+
+  - id: update_macro_data
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/update_macro.py"]
+    env:
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    timeout: PT30M
+    retry:
+      type: constant
+      maxAttempt: 2
+      interval: PT5M
+    dependsOn:
+      - check_cycle_complete
+    condition: "{{ outputs.check_cycle_complete.stdout | trim == 'COMPLETE' }}"
+
+  - id: clear_cycle_flag
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    command: ["sh", "-c", "rm -f /app/data/batch_cycle_complete.flag"]
+    timeout: PT1M
+    dependsOn:
+      - update_macro_data
+
+  - id: completion_message
+    type: io.kestra.plugin.core.log.Log
+    message: "Complete daily ingestion finished - all 523 tickers processed!"
+    dependsOn:
+      - process_all_batches
+
+triggers:
+  - id: schedule_daily_after_market
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 21 * * 1-5" # 9 PM EST on weekdays (after market close)
+    timezone: America/New_York 

@@ -22,3 +22,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CandleThrob.utils.oracle_conn import OracleDB
 # Try to import TA-Lib with fallback
 
+def transform_tickers():
+    
+    
+    
+def main():
+    
+    
+    
+if __name__ == "__main__":
+    main()
+
