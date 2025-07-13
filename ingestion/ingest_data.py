@@ -6,20 +6,20 @@ import logging
 import time
 from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from ingestion.fetch_data import DataIngestion
-from utils.models import TickerData, MacroData
-from utils.oracledb import OracleDB
-
+from CandleThrob.ingestion.fetch_data import DataIngestion
+from CandleThrob.utils.models import TickerData, MacroData
+from CandleThrob.utils.oracle_conn import OracleDB
 
 
 logging.basicConfig(
-    filename="ingestion/debug.log",
+    filename="apps/logs/ingest_debug.log", 
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 DB = OracleDB()
+ENGINE = DB.get_sqlalchemy_engine()
 
 def update_ticker_data(ticker: str):
     """
@@ -31,13 +31,14 @@ def update_ticker_data(ticker: str):
     """
     logger.info("Fetching ticker data for %s using Polygon.io", ticker)
     
-    with DB.get_oracledb_session() as session:
-        TickerData().create_table(session)
+    with DB.establish_connection() as conn:
+        with conn.cursor() as cursor:
+            TickerData().create_table(cursor)
         
         # Check if data exists and get the last date
         ticker_model = TickerData()
-        if ticker_model.data_exists(session, ticker):
-            last_date = ticker_model.get_last_date(session, ticker)
+        if ticker_model.data_exists(conn, ticker):
+            last_date = ticker_model.get_last_date(conn, ticker)
             if last_date:
                 # Start from the day after the last date
                 from datetime import timedelta
@@ -67,7 +68,7 @@ def update_ticker_data(ticker: str):
             return
         
         logger.info("Saving %d records for %s to Oracle DB using bulk insert", len(ticker_df), ticker)
-        ticker_model.insert_data(session, ticker_df)
+        ticker_model.insert_data(ENGINE, ticker_df)
         logger.info("Successfully saved %d records for %s", len(ticker_df), ticker)
 
 
@@ -78,13 +79,14 @@ def update_macro_data():
     """
     logger.info("Updating macroeconomic data...")
     
-    with DB.get_oracledb_session() as session:
-        MacroData().create_table(session)
+    with DB.establish_connection() as conn:
+        with conn.cursor() as cursor:
+            MacroData().create_table(cursor)
         
         # Check if macro data exists and get the last date
         macro_model = MacroData()
-        if macro_model.data_exists(session):
-            last_date = macro_model.get_last_date(session)
+        if macro_model.data_exists(conn):
+            last_date = macro_model.get_last_date(conn)
             if last_date:
                 # Start from the day after the last date
                 from datetime import timedelta
@@ -116,7 +118,7 @@ def update_macro_data():
             return
         
         logger.info("Saving %d macro records to Oracle DB using bulk insert", len(data.macro_df))
-        macro_model.insert_data(session, data.macro_df)
+        macro_model.insert_data(conn, data.macro_df)
         logger.info("Successfully saved %d macro records", len(data.macro_df))
 
     logger.info("Macro data updated successfully.")
@@ -159,15 +161,15 @@ def test_ingest_data():
     from sqlalchemy import func
     logger.info("Testing data ingestion by querying data from Oracle DB...")
     
-    with DB.get_oracledb_session() as session:
+    with DB.establish_connection() as conn:
         # Check ticker data
         ticker_model = TickerData()
-        if ticker_model.data_exists(session):
-            last_date = ticker_model.get_last_date(session)
+        if ticker_model.data_exists(conn):
+            last_date = ticker_model.get_last_date(conn)
             
             # Count total records
-            ticker_count = session.query(func.count(TickerData.id)).scalar()
-            ticker_symbol_count = session.query(func.count(func.distinct(TickerData.ticker))).scalar()
+            ticker_count = conn.query(func.count(TickerData.id)).scalar()
+            ticker_symbol_count = conn.query(func.count(func.distinct(TickerData.ticker))).scalar()
             
             logger.info("Ticker data - Total records: %d, Unique tickers: %d, Last date: %s", 
                        ticker_count, ticker_symbol_count, last_date)
@@ -176,12 +178,12 @@ def test_ingest_data():
         
         # Check macro data
         macro_model = MacroData()
-        if macro_model.data_exists(session):
-            last_date = macro_model.get_last_date(session)
+        if macro_model.data_exists(conn):
+            last_date = macro_model.get_last_date(conn)
             
             # Count total records
-            macro_count = session.query(func.count(MacroData.id)).scalar()
-            indicator_count = session.query(func.count(func.distinct(MacroData.series_id))).scalar()
+            macro_count = conn.query(func.count(MacroData.id)).scalar()
+            indicator_count = conn.query(func.count(func.distinct(MacroData.series_id))).scalar()
             
             logger.info("Macro data - Total records: %d, Unique indicators: %d, Last date: %s", 
                        macro_count, indicator_count, last_date)
@@ -242,10 +244,11 @@ def main():
     
     logger.info("Batch %d completed successfully. Processed %d tickers.", batch_num, len(batch_tickers))
     test_ingest_data()
-    logger.info("Oracle DB session will close automatically via context manager.")
+    logger.info("Oracle DB conn will close automatically via context manager.")
     
     
 
 if __name__ == "__main__":
     main()
+    print("Data ingestion process completed successfully.")
     logger.info("Script executed successfully.")

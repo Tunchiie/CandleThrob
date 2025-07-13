@@ -4,30 +4,30 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date as date_type
 from unittest.mock import Mock, patch
-from ingestion.fetch_data import DataIngestion
-from utils.models import MacroData
+from CandleThrob.ingestion.fetch_data import DataIngestion
+from CandleThrob.utils.models import MacroData
 
 
 class TestMacroDataFunctionality:
     """Comprehensive test suite for macroeconomic data functionality."""
 
     @pytest.fixture(scope="function")
-    def db_session(self):
-        """Create a fresh in-memory database session for testing."""
+    def db_conn(self):
+        """Create a fresh in-memory database conn for testing."""
         from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.orm import connmaker
         from utils.models import Base
         
         # Create in-memory SQLite database for testing
         engine = create_engine("sqlite:///:memory:", echo=False)
         Base.metadata.create_all(engine)
-        Session = sessionmaker(bind=engine)
-        session = Session()
+        conn = connmaker(bind=engine)
+        conn = conn()
         
         try:
-            yield session
+            yield conn
         finally:
-            session.close()
+            conn.close()
 
     @pytest.fixture
     def sample_macro_data(self):
@@ -66,74 +66,74 @@ class TestMacroDataFunctionality:
             mock_instance.get_series.side_effect = lambda series_id, **kwargs: mock_data.get(series_id, pd.Series())
             yield mock_instance
 
-    def test_create_table(self, db_session):
+    def test_create_table(self, db_conn):
         """Test that MacroData table can be created."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         # Verify table exists by checking if we can query it
-        db_session.query(MacroData).first()
+        db_conn.query(MacroData).first()
         # Should not raise an exception even if empty
         
-    def test_data_exists_empty_table(self, db_session):
+    def test_data_exists_empty_table(self, db_conn):
         """Test data_exists returns False for empty table."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
-        assert not macro_model.data_exists(db_session)
-        assert not macro_model.data_exists(db_session, series_id='FEDFUNDS')
+        assert not macro_model.data_exists(db_conn)
+        assert not macro_model.data_exists(db_conn, series_id='FEDFUNDS')
     
-    def test_get_last_date_empty_table(self, db_session):
+    def test_get_last_date_empty_table(self, db_conn):
         """Test get_last_date returns None for empty table."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
-        assert macro_model.get_last_date(db_session) is None
-        assert macro_model.get_last_date(db_session, series_id='FEDFUNDS') is None
+        assert macro_model.get_last_date(db_conn) is None
+        assert macro_model.get_last_date(db_conn, series_id='FEDFUNDS') is None
     
-    def test_insert_data_valid(self, db_session, sample_macro_data):
+    def test_insert_data_valid(self, db_conn, sample_macro_data):
         """Test inserting valid macro data."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         # Insert sample data
-        macro_model.insert_data(db_session, sample_macro_data)
+        macro_model.insert_data(db_conn, sample_macro_data)
         
         # Verify data was inserted
-        assert macro_model.data_exists(db_session)
+        assert macro_model.data_exists(db_conn)
         
         # Check specific series
-        assert macro_model.data_exists(db_session, series_id='FEDFUNDS')
-        assert macro_model.data_exists(db_session, series_id='CPIAUCSL')
+        assert macro_model.data_exists(db_conn, series_id='FEDFUNDS')
+        assert macro_model.data_exists(db_conn, series_id='CPIAUCSL')
         
         # Check record count
-        count = db_session.query(MacroData).count()
+        count = db_conn.query(MacroData).count()
         assert count == len(sample_macro_data)
     
-    def test_insert_data_incremental_loading(self, db_session, sample_macro_data):
+    def test_insert_data_incremental_loading(self, db_conn, sample_macro_data):
         """Test incremental loading - only new data should be inserted."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         # Insert initial data
-        macro_model.insert_data(db_session, sample_macro_data)
-        initial_count = db_session.query(MacroData).count()
+        macro_model.insert_data(db_conn, sample_macro_data)
+        initial_count = db_conn.query(MacroData).count()
         
         # Try to insert the same data again
-        macro_model.insert_data(db_session, sample_macro_data)
-        final_count = db_session.query(MacroData).count()
+        macro_model.insert_data(db_conn, sample_macro_data)
+        final_count = db_conn.query(MacroData).count()
         
         # Count should remain the same (no duplicates)
         assert final_count == initial_count
     
-    def test_insert_data_new_dates(self, db_session, sample_macro_data):
+    def test_insert_data_new_dates(self, db_conn, sample_macro_data):
         """Test that new dates are properly inserted."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         # Insert initial data
-        macro_model.insert_data(db_session, sample_macro_data)
-        initial_count = db_session.query(MacroData).count()
+        macro_model.insert_data(db_conn, sample_macro_data)
+        initial_count = db_conn.query(MacroData).count()
         
         # Create new data with later dates
         new_dates = pd.date_range(start='2024-01-06', end='2024-01-08', freq='D')
@@ -147,33 +147,33 @@ class TestMacroDataFunctionality:
                 })
         
         new_df = pd.DataFrame(new_data)
-        macro_model.insert_data(db_session, new_df)
+        macro_model.insert_data(db_conn, new_df)
         
-        final_count = db_session.query(MacroData).count()
+        final_count = db_conn.query(MacroData).count()
         assert final_count == initial_count + len(new_df)
     
-    def test_get_last_date_with_data(self, db_session, sample_macro_data):
+    def test_get_last_date_with_data(self, db_conn, sample_macro_data):
         """Test get_last_date returns correct date when data exists."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
-        macro_model.insert_data(db_session, sample_macro_data)
+        macro_model.insert_data(db_conn, sample_macro_data)
         
-        last_date = macro_model.get_last_date(db_session)
+        last_date = macro_model.get_last_date(db_conn)
         expected_date = sample_macro_data['date'].max()
         
         assert last_date == expected_date
     
-    def test_insert_empty_dataframe(self, db_session):
+    def test_insert_empty_dataframe(self, db_conn):
         """Test inserting empty DataFrame doesn't cause errors."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         empty_df = pd.DataFrame(columns=['date', 'series_id', 'value'])
-        macro_model.insert_data(db_session, empty_df)
+        macro_model.insert_data(db_conn, empty_df)
         
         # Should not raise exception and should remain empty
-        assert not macro_model.data_exists(db_session)
+        assert not macro_model.data_exists(db_conn)
 
     @patch.dict(os.environ, {'FRED_API_KEY': 'test_key'})
     def test_fetch_fred_data_initialization(self):
@@ -349,18 +349,18 @@ class TestMacroDataFunctionality:
         """Test handling of database connection errors."""
         macro_model = MacroData()
         
-        # Mock a session that raises an exception
-        mock_session = Mock()
-        mock_session.query.side_effect = Exception("Database connection error")
+        # Mock a conn that raises an exception
+        mock_conn = Mock()
+        mock_conn.query.side_effect = Exception("Database connection error")
         
         # Should handle the error gracefully
-        assert not macro_model.data_exists(mock_session)
-        assert macro_model.get_last_date(mock_session) is None
+        assert not macro_model.data_exists(mock_conn)
+        assert macro_model.get_last_date(mock_conn) is None
     
-    def test_malformed_data_insertion(self, db_session):
+    def test_malformed_data_insertion(self, db_conn):
         """Test handling of malformed data during insertion."""
         macro_model = MacroData()
-        macro_model.create_table(db_session)
+        macro_model.create_table(db_conn)
         
         # Create malformed data (missing required columns)
         bad_data = pd.DataFrame({
@@ -370,7 +370,7 @@ class TestMacroDataFunctionality:
         
         # Should handle the error without crashing
         with pytest.raises(Exception):
-            macro_model.insert_data(db_session, bad_data)
+            macro_model.insert_data(db_conn, bad_data)
 
 
 if __name__ == "__main__":

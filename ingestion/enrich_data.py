@@ -3,7 +3,7 @@ import os
 import logging
 from tqdm import tqdm
 from datetime import datetime
-from ingestion.fetch_data import DataIngestion
+from CandleThrob.ingestion.fetch_data import DataIngestion
 
 
 # Try to import talib, with fallback if not available
@@ -16,7 +16,7 @@ except ImportError as e:
     TALIB_AVAILABLE = False
 
 logging.basicConfig(
-    filename="ingestion/enrich_debug.log",
+    filename="transform_debug.log", 
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )

@@ -40,7 +40,7 @@ def __init__(self):
 
 ### Core Methods
 
-#### get_oracledb_session() -> None
+#### establish_connection() -> None
 **Purpose:** Establishes connection to Oracle database and creates SQLAlchemy session.
 
 **Environment Variables Required:**
@@ -199,7 +199,7 @@ oracle_db = OracleDB()
 
 try:
     # Establish connection
-    oracle_db.get_oracledb_session()
+    oracle_db.establish_connection()
     
     # Use session for database operations
     result = oracle_db.session.execute("SELECT SYSDATE FROM dual")
@@ -217,7 +217,7 @@ from utils.oracledb import OracleDB
 
 # Test Oracle connectivity
 oracle_db = OracleDB()
-oracle_db.get_oracledb_session()
+oracle_db.establish_connection()
 oracle_db.test_connection()  # Automatically closes session
 ```
 
@@ -228,7 +228,7 @@ from utils.models import TickerData, Base
 
 # Initialize database
 oracle_db = OracleDB()
-oracle_db.get_oracledb_session()
+oracle_db.establish_connection()
 
 try:
     # Create tables if they don't exist
@@ -264,7 +264,7 @@ from utils.oracledb import OracleDB
 def oracle_session():
     """Context manager for Oracle database sessions."""
     oracle_db = OracleDB()
-    oracle_db.get_oracledb_session()
+    oracle_db.establish_connection()
     try:
         yield oracle_db.session
     finally:
@@ -294,7 +294,7 @@ with oracle_session() as session:
 ### Transaction Management
 ```python
 # Explicit transaction control
-oracle_db.get_oracledb_session()
+oracle_db.establish_connection()
 try:
     oracle_db.session.begin()
     
@@ -436,7 +436,7 @@ except ImportError as e:
 # Test connection string construction
 from utils.oracledb import OracleDB
 oracle_db = OracleDB()
-# Add debug prints in get_oracledb_session method
+# Add debug prints in establish_connection method
 ```
 
 ## Best Practices

@@ -1,15 +1,16 @@
 import logging
 import time
 import re
-import os
-import requests
 import pandas as pd
 from fredapi import Fred
 from datetime import datetime, timedelta
 from tqdm import tqdm
+from CandleThrob.utils.vault import get_secret
+from polygon import RESTClient
+
 
 logging.basicConfig(
-    filename="ingestion/ingest_debug.log",
+    filename="ingest_debug.log", 
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -90,7 +91,7 @@ class DataIngestion:
             TypeError: If there is a type mismatch in the data. 
         """
         try:
-            api_key = os.getenv("POLYGON_API_KEY")
+            api_key = get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaca7fcwmhm3y6pjqoe5arj47tcvpvidiniodv2p7d2xcq")
             if not api_key:
                 logger.error("Polygon.io API key not found. Please set POLYGON_API_KEY environment variable.")
                 return pd.DataFrame()
@@ -100,53 +101,20 @@ class DataIngestion:
             to_date = self.end_date.strftime("%Y-%m-%d")
             
             # Polygon.io aggregates endpoint
-            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{from_date}/{to_date}"
-            params = {
-                "adjusted": "true",
-                "sort": "asc",
-                "limit": 50000, 
-                "apikey": api_key
-            }
-            
-            logger.info("Fetching Polygon.io OHLCV data for %s", ticker)
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get("status") != "OK":
-                logger.warning("Polygon.io API error for %s: %s", ticker, data.get("message", "Unknown error"))
-                return pd.DataFrame()
-            
-            if "results" not in data or not data["results"]:
-                logger.warning("No Polygon.io data found for %s", ticker)
-                return pd.DataFrame()
-            
-            # Convert to DataFrame
-            df_data = []
-            for bar in data["results"]:
-                # Polygon returns timestamp in milliseconds
-                date_obj = datetime.fromtimestamp(bar["t"] / 1000)
-                
-                df_data.append({
-                    "date": date_obj.date(),
-                    "open": float(bar["o"]),
-                    "high": float(bar["h"]),
-                    "low": float(bar["l"]),
-                    "close": float(bar["c"]),
-                    "volume": int(bar["v"]),
-                    "ticker": ticker
-                })
-            
-            if df_data:
-                df = pd.DataFrame(df_data)
-                df['date'] = pd.to_datetime(df['date'])
-                df.sort_values("date", inplace=True)
-                df.reset_index(drop=True, inplace=True)
-                logger.info("Successfully fetched Polygon.io OHLCV data for %s (%d days)", ticker, len(df))
-                return df
-                
-        except requests.RequestException as e:
-            logger.error("Polygon.io request error for %s: %s", ticker, str(e))
+            client = RESTClient(api_key)
+
+            two_years = datetime.utcnow() - timedelta(days=365 * 2)
+            if self.start_date < two_years:
+                logger.info("Fetching Polygon.io OHLCV data for %s", ticker)
+                trades = client.get_aggs(ticker,multiplier=1,timespan="day", from_=from_date, to=to_date, adjusted=True)
+            else:
+                logger.info("Fetching Polygon.io OHLCV data for %s with 1 minute granularity", ticker)
+                trades = client.get_aggs(ticker, multiplier=1, timespan="minute", from_=from_date, to=to_date, adjusted=True)
+            data = pd.DataFrame(trades)
+            data["ticker"] = ticker
+            data["trade_date"] = pd.to_datetime(data["timestamp"], unit='ms')
+            return data
+    
         except (KeyError, ValueError, TypeError) as e:
             logger.error("Polygon.io data parsing error for %s: %s", ticker, str(e))
         except Exception as e:
@@ -219,10 +187,10 @@ class DataIngestion:
             Exception: If the FRED API key is not set in the environment variables.
         """
         
-        if not os.getenv("FRED_API_KEY"):
+        if not get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyawwc75zpuccl4qzs5qewxaauzwjfpxmsjmhu5umoij2oa"):
             raise RuntimeError("FRED API key is not set. Please set the FRED_API_KEY environment variable.")
 
-        fred_api = Fred(os.getenv("FRED_API_KEY"))
+        fred_api = Fred(get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyawwc75zpuccl4qzs5qewxaauzwjfpxmsjmhu5umoij2oa"))
         fred_series = {
             "FEDFUNDS": "Federal_Funds_Rate",
             "CPIAUCSL": "Consumer_Price_Index",
@@ -251,10 +219,10 @@ class DataIngestion:
         fred_df.index = pd.to_datetime(fred_df.index)
         fred_df = fred_df.resample('D').mean().ffill().bfill()
         fred_df.reset_index(names='date', inplace=True)
-        fred_df['date'] = fred_df['date'].dt.normalize()
+        fred_df['trade_date'] = fred_df['date'].dt.normalize()
         
         # Transform to long format for MacroData model
-        melted_df = pd.melt(fred_df, id_vars=['date'], var_name='series_id', value_name='value')
+        melted_df = pd.melt(fred_df, id_vars=['trade_date'], var_name='series_id', value_name='value')
         melted_df = melted_df.dropna(subset=['value'])  # Remove rows with NaN values
         
         # Don't add year, month, weekday - they're not in the current models

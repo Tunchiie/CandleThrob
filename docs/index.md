@@ -188,7 +188,7 @@ Core utility modules for database operations and data management.
 
 **Classes & Methods**:
 - `OracleDB`: Main database connection class
-- `get_oracledb_session()`: Session establishment
+- `establish_connection()`: Session establishment
 - `close_oracledb_session()`: Resource cleanup
 - `test_connection()`: Connectivity validation
 

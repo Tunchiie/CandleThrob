@@ -1,9 +1,9 @@
 import pytest
 import pandas as pd
-from ingestion.fetch_data import DataIngestion
-from ingestion.ingest_data import clean_ticker, get_etf_tickers, get_sp500_tickers
-from utils.oracledb import OracleDB
-from utils.models import TickerData, MacroData
+from CandleThrob.ingestion.fetch_data import DataIngestion
+from CandleThrob.ingestion.ingest_data import clean_ticker, get_etf_tickers, get_sp500_tickers
+from CandleThrob.utils.oracle_conn import OracleDB
+from CandleThrob.utils.models import TickerData, MacroData
 
 """
 Updated test functions for data ingestion functionality, including tests for
@@ -93,24 +93,24 @@ def test_get_sp500_tickers():
 
 def test_database_connection(db):
     """Test database connection and basic operations."""
-    with db.get_oracledb_session() as session:
+    with db.establish_connection() as conn:
         from sqlalchemy import text
         
         # Test basic query
-        result = session.execute(text("SELECT 1 as test_col"))
+        result = conn.execute(text("SELECT 1 as test_col"))
         row = result.fetchone()
         assert row[0] == 1
 
 def test_ticker_data_table_creation(db):
     """Test TickerData table creation."""
-    with db.get_oracledb_session() as session:
+    with db.establish_connection() as conn:
         ticker_data = TickerData()
-        ticker_data.create_table(session)
+        ticker_data.create_table(conn)
         
         # Verify table exists by attempting to query it
         from sqlalchemy import text
         try:
-            result = session.execute(text("SELECT COUNT(*) FROM ticker_data"))
+            result = conn.execute(text("SELECT COUNT(*) FROM ticker_data"))
             count = result.fetchone()[0]
             assert count >= 0  # Should return 0 or more rows
         except Exception as e:
@@ -118,14 +118,14 @@ def test_ticker_data_table_creation(db):
 
 def test_macro_data_table_creation(db):
     """Test MacroData table creation."""
-    with db.get_oracledb_session() as session:
+    with db.establish_connection() as conn:
         macro_data = MacroData()
-        macro_data.create_table(session)
+        macro_data.create_table(conn)
         
         # Verify table exists by attempting to query it  
         from sqlalchemy import text
         try:
-            result = session.execute(text("SELECT COUNT(*) FROM macro_data"))
+            result = conn.execute(text("SELECT COUNT(*) FROM macro_data"))
             count = result.fetchone()[0]
             assert count >= 0  # Should return 0 or more rows
         except Exception as e:
@@ -133,9 +133,9 @@ def test_macro_data_table_creation(db):
 
 def test_data_insertion_ticker(db):
     """Test inserting ticker data into database."""
-    with db.get_oracledb_session() as session:
+    with db.establish_connection() as conn:
         ticker_data = TickerData()
-        ticker_data.create_table(session)
+        ticker_data.create_table(conn)
         
         # Create sample DataFrame
         sample_df = pd.DataFrame({
@@ -149,7 +149,7 @@ def test_data_insertion_ticker(db):
         })
         
         try:
-            ticker_data.insert_data(session, sample_df)
+            ticker_data.insert_data(conn, sample_df)
             # If no exception is raised, insertion was successful
             assert True
         except Exception as e:
@@ -157,9 +157,9 @@ def test_data_insertion_ticker(db):
 
 def test_data_insertion_macro(db):
     """Test inserting macro data into database."""
-    with db.get_oracledb_session() as session:
+    with db.establish_connection() as conn:
         macro_data = MacroData()
-        macro_data.create_table(session)
+        macro_data.create_table(conn)
         
         # Create sample DataFrame
         sample_df = pd.DataFrame({
@@ -169,7 +169,7 @@ def test_data_insertion_macro(db):
         })
         
         try:
-            macro_data.insert_data(session, sample_df)
+            macro_data.insert_data(conn, sample_df)
             # If no exception is raised, insertion was successful
             assert True
         except Exception as e:

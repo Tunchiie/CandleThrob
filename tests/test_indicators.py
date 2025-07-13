@@ -1,6 +1,6 @@
 import pytest
-from ingestion.fetch_data import DataIngestion
-from ingestion.enrich_data import TechnicalIndicators
+from CandleThrob.ingestion.fetch_data import DataIngestion
+from CandleThrob.ingestion.enrich_data import TechnicalIndicators
 import pandas as pd
 
 """

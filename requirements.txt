@@ -117,3 +117,6 @@ websockets==14.2
     # via polygon-api-client
 zipp==3.23.0
     # via importlib-resources
+tqdm
+oci
+lxml
