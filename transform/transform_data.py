@@ -277,13 +277,14 @@ class CompleteDataTransform:
                     
                     # Calculate technical indicators
                     transformed_ticker_data = TechnicalIndicators(ticker_df)
-                    transformed_ticker_data.transform_data()
-                    
+                    transformed_ticker_data.enrich_tickers()
+                    enriched_df = transformed_ticker_data.transform()
+
                     # Insert transformed data
-                    if transformed_ticker_data.transformed_data is not None:
+                    if enriched_df is not None and not enriched_df.empty:
                         transformed_ticker_model.insert_data(
-                            self.engine, 
-                            transformed_ticker_data.transformed_data
+                            self.engine,
+                            enriched_df
                         )
                         logger.info(f"Transformed data for ticker: {ticker} inserted into database")
                     else:
@@ -347,13 +348,13 @@ class CompleteDataTransform:
                     
                     # Transform macro data
                     transformed_macro_data = EnrichMacros(macro_df, series_id)
-                    transformed_macro_data.transform_data()
-                    
+                    enriched_macro_df = transformed_macro_data.transform_macro_data()
+
                     # Insert transformed data
-                    if transformed_macro_data.transformed_data is not None:
+                    if enriched_macro_df is not None and not enriched_macro_df.empty:
                         transformed_macro_model.insert_data(
-                            self.engine, 
-                            transformed_macro_data.transformed_data
+                            self.engine,
+                            enriched_macro_df
                         )
                         logger.info(f"Transformed macro data for series {series_id} inserted into database")
                     else:

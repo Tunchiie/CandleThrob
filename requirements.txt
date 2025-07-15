@@ -18,6 +18,7 @@ yfinance>=0.2.18
 tqdm>=4.67.1
 lxml>=4.9.0
 pandas-ta>=0.3.14b0
+TA-Lib>=0.4.25
 
 # Additional dependencies from old requirements.txt
 beautifulsoup4>=4.13.4

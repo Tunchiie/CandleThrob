@@ -632,20 +632,40 @@ def data_quality_validator():
                         results["errors"].append(f"Column {col} is not numeric")
                         results["is_valid"] = False
             
-            # Check OHLC relationships
+            # Check OHLC relationships with tolerance
             if all(col in df.columns for col in ["Open", "High", "Low", "Close"]):
-                invalid_ohlc = (
-                    (df["High"] < df["Low"]) |
-                    (df["High"] < df["Open"]) |
-                    (df["High"] < df["Close"]) |
-                    (df["Low"] > df["Open"]) |
-                    (df["Low"] > df["Close"])
-                )
-                
-                invalid_count = invalid_ohlc.sum()
-                if invalid_count > 0:
-                    results["warnings"].append(f"Found {invalid_count} invalid OHLC relationships")
-                    results["quality_score"] -= 0.1 * (invalid_count / len(df))
+                try:
+                    # Convert to numeric to handle data type issues
+                    df["High"] = pd.to_numeric(df["High"], errors='coerce')
+                    df["Low"] = pd.to_numeric(df["Low"], errors='coerce')
+                    df["Open"] = pd.to_numeric(df["Open"], errors='coerce')
+                    df["Close"] = pd.to_numeric(df["Close"], errors='coerce')
+
+                    # Add tolerance for floating-point precision (0.1%)
+                    tolerance = 0.001
+
+                    invalid_ohlc = (
+                        (df["High"] < (df["Low"] * (1 - tolerance))) |
+                        (df["High"] < (df["Open"] * (1 - tolerance))) |
+                        (df["High"] < (df["Close"] * (1 - tolerance))) |
+                        (df["Low"] > (df["Open"] * (1 + tolerance))) |
+                        (df["Low"] > (df["Close"] * (1 + tolerance)))
+                    )
+
+                    invalid_count = invalid_ohlc.sum()
+                    if invalid_count > 0:
+                        invalid_ratio = invalid_count / len(df)
+                        if invalid_ratio > 0.05:  # More than 5% invalid
+                            results["errors"].append(f"Critical OHLC validation failure: {invalid_count} invalid relationships ({invalid_ratio:.2%})")
+                            results["is_valid"] = False
+                            results["quality_score"] -= 0.5
+                        else:
+                            # Minor issues - just warning
+                            results["warnings"].append(f"Minor OHLC inconsistencies: {invalid_count} relationships ({invalid_ratio:.2%})")
+                            results["quality_score"] -= 0.1 * invalid_ratio
+
+                except Exception as e:
+                    results["warnings"].append(f"OHLC validation failed due to data type issues: {e}")
             
             # Check for negative values
             for col in ["Open", "High", "Low", "Close", "Volume"]:

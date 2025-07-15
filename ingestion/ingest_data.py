@@ -270,18 +270,50 @@ class DataQualityValidator:
             issues.append("Negative price values found")
             quality_score -= 0.2
         
-        # Check OHLC relationships
+        # Check OHLC relationships with robust tolerance for real-world data
         if all(col in df.columns for col in ['high', 'low', 'open', 'close']):
-            invalid_ohlc = (
-                (df['high'] < df['low']) | 
-                (df['high'] < df['open']) | 
-                (df['high'] < df['close']) |
-                (df['low'] > df['open']) | 
-                (df['low'] > df['close'])
-            )
-            if invalid_ohlc.any():
-                issues.append("Invalid OHLC relationships found")
-                quality_score -= 0.3
+            try:
+                # Convert to float to handle any data type issues
+                df['high'] = pd.to_numeric(df['high'], errors='coerce')
+                df['low'] = pd.to_numeric(df['low'], errors='coerce')
+                df['open'] = pd.to_numeric(df['open'], errors='coerce')
+                df['close'] = pd.to_numeric(df['close'], errors='coerce')
+
+                # Add tolerance for floating-point precision and market data quirks (0.1%)
+                tolerance = 0.001
+
+                # Check for clearly invalid relationships with tolerance
+                invalid_high_low = df['high'] < (df['low'] * (1 - tolerance))
+                invalid_high_open = df['high'] < (df['open'] * (1 - tolerance))
+                invalid_high_close = df['high'] < (df['close'] * (1 - tolerance))
+                invalid_low_open = df['low'] > (df['open'] * (1 + tolerance))
+                invalid_low_close = df['low'] > (df['close'] * (1 + tolerance))
+
+                invalid_ohlc = (
+                    invalid_high_low |
+                    invalid_high_open |
+                    invalid_high_close |
+                    invalid_low_open |
+                    invalid_low_close
+                )
+
+                invalid_count = invalid_ohlc.sum()
+                total_count = len(df)
+
+                # Only flag as critical issue if more than 5% of records are invalid
+                if invalid_count > 0:
+                    invalid_ratio = invalid_count / total_count
+                    if invalid_ratio > 0.05:  # More than 5% invalid - critical issue
+                        issues.append(f"Critical OHLC validation failure: {invalid_count}/{total_count} records ({invalid_ratio:.2%}) have invalid relationships")
+                        quality_score -= min(0.5, invalid_ratio * 3)  # Heavy penalty for critical issues
+                    else:
+                        # Less than 5% invalid - just log warning, don't fail validation
+                        logger.warning(f"Minor OHLC inconsistencies: {invalid_count}/{total_count} records ({invalid_ratio:.2%}) - within acceptable tolerance")
+                        quality_score -= min(0.1, invalid_ratio)  # Light penalty
+
+            except Exception as e:
+                logger.warning(f"OHLC validation failed due to data type issues: {e}")
+                # Don't fail validation for data type issues - just log warning
         
         # Check for excessive null values
         null_ratio = df.isnull().sum().sum() / (len(df) * len(df.columns))

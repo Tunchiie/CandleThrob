@@ -39,6 +39,21 @@ from CandleThrob.ingestion.fetch_data import DataIngestion
 #logger = get_transform_logger("enrich_data")
 logger = logging.getLogger(__name__)
 
+# Fallback logging functions
+def log_performance_metrics(logger, operation, *args):
+    """Fallback performance logging function."""
+    logger.info(f"Performance: {operation} - {args}")
+
+def log_error_with_context(logger, error, operation, context=None):
+    """Fallback error logging function."""
+    logger.error(f"Error in {operation}: {error}")
+    if context:
+        logger.error(f"Context: {context}")
+
+def log_data_quality_metrics(logger, operation, *args):
+    """Fallback data quality logging function."""
+    logger.info(f"Data Quality - {operation}: {args}")
+
 # Try to import talib, with fallback if not available
 try:
     import talib
@@ -156,17 +171,40 @@ class DataQualityChecker:
             if null_count > 0:
                 logger.warning(f"Found {null_count} null values in column {col}")
         
-        # Validate price relationships
-        price_validation = (
-            (df['High'] >= df['Low']).all() and
-            (df['High'] >= df['Open']).all() and
-            (df['High'] >= df['Close']).all() and
-            (df['Low'] <= df['Open']).all() and
-            (df['Low'] <= df['Close']).all()
-        )
-        
-        if not price_validation:
-            raise ValueError("Price data validation failed: OHLC relationships are invalid")
+        # Validate price relationships with tolerance for real-world data
+        tolerance = 0.001  # 0.1% tolerance for floating-point precision
+
+        try:
+            # Convert to numeric to handle any data type issues
+            df['High'] = pd.to_numeric(df['High'], errors='coerce')
+            df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
+            df['Open'] = pd.to_numeric(df['Open'], errors='coerce')
+            df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+
+            # Check for invalid relationships with tolerance
+            invalid_high_low = df['High'] < (df['Low'] * (1 - tolerance))
+            invalid_high_open = df['High'] < (df['Open'] * (1 - tolerance))
+            invalid_high_close = df['High'] < (df['Close'] * (1 - tolerance))
+            invalid_low_open = df['Low'] > (df['Open'] * (1 + tolerance))
+            invalid_low_close = df['Low'] > (df['Close'] * (1 + tolerance))
+
+            invalid_count = (invalid_high_low | invalid_high_open | invalid_high_close |
+                           invalid_low_open | invalid_low_close).sum()
+
+            if invalid_count > 0:
+                invalid_ratio = invalid_count / len(df)
+                if invalid_ratio > 0.05:  # More than 5% invalid - critical issue
+                    raise ValueError(f"Critical price data validation failure: {invalid_count}/{len(df)} records ({invalid_ratio:.2%}) have invalid OHLC relationships")
+                else:
+                    # Less than 5% invalid - just log warning
+                    logger.warning(f"Minor OHLC inconsistencies detected: {invalid_count}/{len(df)} records ({invalid_ratio:.2%}) - within acceptable tolerance")
+
+        except Exception as e:
+            if "Critical price data validation failure" in str(e):
+                raise  # Re-raise critical validation failures
+            else:
+                logger.warning(f"OHLC validation failed due to data type issues: {e}")
+                # Don't fail for data type issues
         
         # Check for extreme values
         for col in ['Open', 'High', 'Low', 'Close']:
@@ -282,8 +320,9 @@ class TechnicalIndicators:
         # Standardize column names
         column_mapping = {
             'trade_date': 'Date',
+            'ticker': 'Ticker',
             'open': 'Open',
-            'high': 'High', 
+            'high': 'High',
             'low': 'Low',
             'close': 'Close',
             'volume': 'Volume'

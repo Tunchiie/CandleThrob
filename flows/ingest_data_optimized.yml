@@ -1,7 +1,21 @@
 id: ingest_data_optimized
 namespace: candlethrob.ingestion
 
-description: "Optimized daily ingestion using development image with embedded wallet"
+description: |
+  MANUAL ONLY - Development ingestion using candlethrob:dev with embedded wallet
+
+  USE CASES:
+  - Development testing of new features
+  - Data recovery with smaller batch sizes (25 vs 100)
+  - Debugging with embedded wallet setup
+  - Emergency backup when production flow fails
+  - Rate limit management during API issues
+
+  CONFIGURATION:
+  - Batch size: 25 (smaller for testing)
+  - Rate limit: 12 req/min (slower for stability)
+  - Image: candlethrob:dev (embedded wallet)
+  - Trigger: MANUAL ONLY (no automatic scheduling)
 
 tasks:
   - id: start_optimized_ingestion
@@ -100,8 +114,22 @@ tasks:
     runIf: "{{ outputs.cleanup_and_summary.exitCode == 0 }}"
     message: "✅ Optimized daily ingestion pipeline completed successfully!"
 
-triggers:
-  - id: schedule_optimized_daily
-    type: io.kestra.plugin.core.trigger.Schedule
-    cron: "0 21 * * 1-5" # 9 PM EST on weekdays
-    timezone: America/New_York
+# Manual trigger only - no automatic scheduling
+# Use this flow for:
+# - Development testing
+# - Data recovery with smaller batches
+# - Debugging with embedded wallet
+# - Emergency backup ingestion
+#
+# triggers:
+#   - id: schedule_optimized_daily
+#     type: io.kestra.plugin.core.trigger.Schedule
+#     cron: "0 21 * * 1-5" # 9 PM EST on weekdays
+#     timezone: America/New_York
+
+labels:
+  environment: "development"
+  team: "data-engineering"
+  criticality: "low"
+  trigger_type: "manual_only"
+  use_cases: "testing,debugging,recovery,backup"
