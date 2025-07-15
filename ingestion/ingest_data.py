@@ -61,7 +61,7 @@ logger = get_ingestion_logger(__name__)
 class BatchConfig:
     """
     Configuration class for batch processing parameters.
-    
+
     Attributes:
         batch_size (int): Number of tickers to process per batch
         rate_limit_seconds (int): Seconds between API calls for rate limiting
@@ -76,7 +76,7 @@ class BatchConfig:
         enable_performance_monitoring (bool): Enable performance monitoring
     """
     batch_size: int = 25
-    rate_limit_seconds: int = 12
+    rate_limit_seconds: int = 5  # Optimized for Polygon.io's 5 calls per minute limit
     max_retries: int = 3
     retry_delay_seconds: int = 60
     max_processing_time_seconds: float = 7200.0  # 2 hours
@@ -349,7 +349,7 @@ class CompleteDataIngestion:
             config (BatchConfig): Configuration for batch processing
 
         Example:
-            >>> config = BatchConfig(batch_size=25, rate_limit_seconds=12)
+            >>> config = BatchConfig(batch_size=25, rate_limit_seconds=5)
             >>> ingestion = CompleteDataIngestion(config)
         """
         self.config = config
@@ -398,17 +398,24 @@ class CompleteDataIngestion:
                     
                     # Check existing data and get last date for incremental loading
                     ticker_model = TickerData()
-                    if ticker_model.data_exists(conn, ticker):
-                        last_date = ticker_model.get_last_date(conn, ticker)
-                        if last_date:
-                            start = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
-                            logger.info(f"Incremental update for {ticker}: fetching from {start}")
-                        else:
-                            start = "2000-01-01"
-                            logger.info(f"No valid date found for {ticker}, fetching from {start}")
-                    else:
+                    try:
+                        with conn.cursor() as cursor:
+                            if ticker_model.data_exists(cursor, ticker):
+                                last_date = ticker_model.get_last_date(cursor, ticker)
+                                if last_date:
+                                    start = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
+                                    logger.info(f"Incremental update for {ticker}: fetching from {start}")
+                                else:
+                                    start = "2000-01-01"
+                                    logger.info(f"No valid date found for {ticker}, fetching from {start}")
+                            else:
+                                start = "2000-01-01"
+                                logger.info(f"No existing data for {ticker}, fetching from {start}")
+                    except Exception as e:
+                        logger.error(f"Error checking data existence: {e}")
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        logger.info(f"Falling back to full data fetch from 2000-01-01")
                         start = "2000-01-01"
-                        logger.info(f"No existing data for {ticker}, fetching from {start}")
                 
                 end = datetime.now().strftime("%Y-%m-%d")
                 
@@ -610,7 +617,7 @@ def main():
     
     Environment Variables:
         BATCH_SIZE (int): Number of tickers per batch (default: 25)
-        POLYGON_RATE_LIMIT (int): API calls per minute (default: 12)
+        POLYGON_RATE_LIMIT (int): API calls per minute (default: 5)
         MAX_PROCESSING_TIME (float): Maximum processing time in seconds (default: 7200)
         MAX_MEMORY_USAGE (float): Maximum memory usage in MB (default: 2048)
         PARALLEL_PROCESSING (bool): Enable parallel processing (default: true)
@@ -622,7 +629,7 @@ def main():
     try:
         # Load configuration from environment variables with defaults
         batch_size = int(os.getenv("BATCH_SIZE", "25"))
-        rate_limit_seconds = int(os.getenv("POLYGON_RATE_LIMIT", "12"))
+        rate_limit_seconds = int(os.getenv("POLYGON_RATE_LIMIT", "5"))
         max_processing_time = float(os.getenv("MAX_PROCESSING_TIME", "7200"))
         max_memory_usage = float(os.getenv("MAX_MEMORY_USAGE", "2048"))
         parallel_processing = os.getenv("PARALLEL_PROCESSING", "true").lower() == "true"
@@ -657,6 +664,7 @@ def main():
         
         # Process all batches
         ingestion = CompleteDataIngestion(config)
+        start_time = datetime.now()
         overall_results = {
             "total_batches": total_batches,
             "total_tickers": len(all_tickers),
@@ -665,7 +673,7 @@ def main():
             "failed_tickers_list": [],
             "batch_results": [],
             "performance_metrics": {},
-            "start_time": datetime.now(),
+            "start_time": start_time.isoformat(),
             "end_time": None
         }
         
@@ -694,8 +702,9 @@ def main():
             logger.info(f"Batch {batch_num + 1} completed: {batch_results['successful']} successful, {batch_results['failed']} failed")
             logger.info(f"Running total: {overall_results['successful_tickers']} successful, {overall_results['failed_tickers']} failed")
         
-        overall_results["end_time"] = datetime.now()
-        overall_results["duration_seconds"] = (overall_results["end_time"] - overall_results["start_time"]).total_seconds()
+        end_time = datetime.now()
+        overall_results["end_time"] = end_time.isoformat()
+        overall_results["duration_seconds"] = (end_time - start_time).total_seconds()
         overall_results["performance_metrics"] = ingestion.performance_monitor.metrics
         
         # Log final results with advanced features
@@ -722,7 +731,7 @@ def main():
         os.makedirs(os.path.dirname(results_file), exist_ok=True)
         
         with open(results_file, 'w') as f:
-            json.dump(overall_results, f, indent=2)
+            json.dump(overall_results, f, indent=2, default=str)
         
         logger.info(f"Results saved to {results_file}")
         

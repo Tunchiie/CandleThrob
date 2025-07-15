@@ -493,7 +493,7 @@ def main():
         }
         
         with open(results_file, 'w') as f:
-            json.dump(combined_results, f, indent=2)
+            json.dump(combined_results, f, indent=2, default=str)
         
         # Print comprehensive summary
         print("\n=== MACRO DATA UPDATE SUMMARY ===")

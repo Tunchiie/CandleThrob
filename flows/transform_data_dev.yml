@@ -1,0 +1,117 @@
+id: transform_data_dev
+namespace: candlethrob.transform
+
+description: "Development transformation flow - processes ticker and macro data with technical indicators using development image"
+
+tasks:
+  - id: start_dev_transformation
+    type: io.kestra.plugin.core.log.Log
+    message: "🚀 Starting development data transformation pipeline"
+
+  - id: validate_dev_ingestion_completion
+    type: io.kestra.plugin.core.log.Log
+    message: "✅ Validating that development ingestion flow has completed successfully"
+
+  # Main transformation task for development
+  - id: transform_dev_ticker_and_macro_data
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command: ["python", "-m", "CandleThrob.transform.transform_data"]
+    env:
+      BATCH_SIZE: "25"
+      LOG_LEVEL: "DEBUG"
+      PYTHONPATH: "/app"
+      # Development image has embedded Oracle wallet and OCI configuration
+    dockerOptions:
+      name: "candlethrob_dev_transform_{{ execution.id }}"
+    timeout: PT2H
+    retry:
+      type: constant
+      maxAttempt: 3
+      interval: PT10M
+
+  # Validate transformation results
+  - id: validate_dev_transformation_results
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.transform_dev_ticker_and_macro_data.exitCode == 0 }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command: 
+      - "python"
+      - "-c"
+      - |
+        from CandleThrob.transform.transform_data import CompleteDataTransform
+        transformer = CompleteDataTransform()
+        validation = transformer.validate_transformation_results()
+        print('VALIDATION_RESULT:', 'PASSED' if validation else 'FAILED')
+        exit(0 if validation else 1)
+    env:
+      PYTHONPATH: "/app"
+    dockerOptions:
+      name: "candlethrob_dev_validate_{{ execution.id }}"
+    timeout: PT10M
+
+  # Get performance metrics
+  - id: get_dev_performance_metrics
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.transform_dev_ticker_and_macro_data.exitCode == 0 }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command:
+      - "python"
+      - "-c"
+      - |
+        from CandleThrob.transform.transform_data import CompleteDataTransform
+        transformer = CompleteDataTransform()
+        metrics = transformer.get_performance_metrics()
+        print('PERFORMANCE_METRICS:', metrics)
+    env:
+      PYTHONPATH: "/app"
+    dockerOptions:
+      name: "candlethrob_dev_metrics_{{ execution.id }}"
+    timeout: PT5M
+
+  # Generate transformation summary
+  - id: generate_dev_transformation_summary
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.validate_dev_transformation_results.exitCode == 0 }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command:
+      - "sh"
+      - "-c"
+      - |
+        echo '=== Development Transformation Summary ==='
+        echo 'Transformation completed at:' $(date)
+        echo 'Checking transformation results...'
+        if [ -f /app/data/transformation_results.json ]; then
+            echo 'Transformation results file found:'
+            cat /app/data/transformation_results.json | head -20
+        else
+            echo 'No transformation results file found'
+        fi
+        echo ''
+        echo 'Checking technical indicators...'
+        if [ -f /app/data/technical_indicators_summary.json ]; then
+            echo 'Technical indicators summary:'
+            cat /app/data/technical_indicators_summary.json | head -10
+        else
+            echo 'No technical indicators summary found'
+        fi
+        echo '=== Development Transformation Complete ==='
+    dockerOptions:
+      name: "candlethrob_dev_summary_{{ execution.id }}"
+    timeout: PT2M
+
+  - id: end_dev_transformation
+    type: io.kestra.plugin.core.log.Log
+    runIf: "{{ outputs.validate_dev_transformation_results.exitCode == 0 and outputs.get_dev_performance_metrics.exitCode == 0 }}"
+    message: "🎉 Development data transformation completed successfully with technical indicators and macro data processing"
+
+# Manual trigger for development testing
+triggers: []

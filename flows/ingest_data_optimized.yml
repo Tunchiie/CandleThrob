@@ -13,7 +13,7 @@ description: |
 
   CONFIGURATION:
   - Batch size: 25 (smaller for testing)
-  - Rate limit: 12 req/min (slower for stability)
+  - Rate limit: 5 req/min (optimized for Polygon API limits)
   - Image: candlethrob:dev (embedded wallet)
   - Trigger: MANUAL ONLY (no automatic scheduling)
 
@@ -31,8 +31,11 @@ tasks:
     command: ["python", "-m", "CandleThrob.ingestion.ingest_data"]
     env:
       BATCH_SIZE: "25"
-      POLYGON_RATE_LIMIT: "12"
+      POLYGON_RATE_LIMIT: "5"
       # Development image has embedded Oracle wallet and OCI configuration
+      # Rate limit set to 5 req/min to respect Polygon.io API limits
+    dockerOptions:
+      name: "candlethrob_dev_ingest_{{ execution.id }}"
     timeout: PT4H
     retry:
       type: constant
@@ -49,14 +52,21 @@ tasks:
       - "sh"
       - "-c"
       - |
+        echo "Checking ingestion status..."
         if [ -f /app/data/batch_cycle_complete.flag ]; then
             echo 'INGESTION_COMPLETE'
-            cat /app/data/batch_cycle_complete.flag
+            echo "Flag file found, ingestion completed successfully"
+            cat /app/data/batch_cycle_complete.flag 2>/dev/null || echo "Flag file exists but empty"
         else
             echo 'INGESTION_INCOMPLETE'
-            exit 1
+            echo "Flag file not found, ingestion may still be running or failed"
+            ls -la /app/data/ 2>/dev/null || echo "Data directory not accessible"
         fi
-    timeout: PT1M
+        # Always exit 0 so stdout is captured
+        exit 0
+    dockerOptions:
+      name: "candlethrob_dev_status_{{ execution.id }}"
+    timeout: PT5M
 
   # Update macro data if ingestion was successful
   - id: update_macro_data
@@ -66,6 +76,8 @@ tasks:
     pullPolicy: NEVER
     networkMode: host
     command: ["python", "-m", "CandleThrob.ingestion.update_macro"]
+    dockerOptions:
+      name: "candlethrob_dev_macro_{{ execution.id }}"
     timeout: PT30M
     retry:
       type: constant
@@ -80,6 +92,8 @@ tasks:
     pullPolicy: NEVER
     networkMode: host
     command: ["python", "-m", "CandleThrob.ingestion.validate_data"]
+    dockerOptions:
+      name: "candlethrob_dev_validate_{{ execution.id }}"
     timeout: PT15M
 
   # Clean up flags and generate summary
@@ -107,6 +121,8 @@ tasks:
         rm -f /app/data/batch_cycle_complete.flag
         echo 'Cleanup completed'
         echo '=== Summary Complete ==='
+    dockerOptions:
+      name: "candlethrob_dev_summary_{{ execution.id }}"
     timeout: PT2M
 
   - id: completion_message

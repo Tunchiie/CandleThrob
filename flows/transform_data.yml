@@ -1,16 +1,19 @@
-id: transform_data
+id: transform_data_production
 namespace: candlethrob.transform
 
+description: "Production transformation flow - processes ticker and macro data with 98+ technical indicators using production image"
+
 tasks:
-  - id: start_transformation
+  - id: start_prod_transformation
     type: io.kestra.plugin.core.log.Log
-    message: "Starting data transformation after ingestion completion"
+    message: "🚀 Starting production data transformation pipeline with TA-Lib indicators"
 
-  - id: validate_ingestion_completion
+  - id: validate_prod_ingestion_completion
     type: io.kestra.plugin.core.log.Log
-    message: "Validating that ingestion flow has completed successfully"
+    message: "✅ Validating that production ingestion flow has completed successfully"
 
-  - id: transform_ticker_data
+  # Main transformation task for production
+  - id: transform_prod_ticker_and_macro_data
     type: io.kestra.plugin.docker.Run
     containerImage: candlethrob:latest
     pullPolicy: NEVER
@@ -18,18 +21,23 @@ tasks:
     env:
       TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
       ORA_PYTHON_DRIVER_TYPE: "thick"
+      BATCH_SIZE: "100"
+      LOG_LEVEL: "INFO"
     volumes:
       - "/tmp/kestra-wd:/app"
       - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    dockerOptions:
+      name: "candlethrob_prod_transform_{{ execution.id }}"
     timeout: PT2H
     retry:
       type: constant
       maxAttempt: 3
       interval: PT10M
 
-  - id: validate_transformation
+  # Validate transformation results
+  - id: validate_prod_transformation_results
     type: io.kestra.plugin.docker.Run
-    runIf: "{{ taskrun(transform_ticker_data).state == 'SUCCESS' }}"
+    runIf: "{{ taskrun(transform_prod_ticker_and_macro_data).state == 'SUCCESS' }}"
     containerImage: candlethrob:latest
     pullPolicy: NEVER
     commands: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 -c \"from CandleThrob.transform.transform_data import CompleteDataTransform; transformer = CompleteDataTransform(); validation = transformer.validate_transformation_results(); print('VALIDATION:', 'PASSED' if validation else 'FAILED'); exit(0 if validation else 1)\""]
@@ -39,11 +47,14 @@ tasks:
     volumes:
       - "/tmp/kestra-wd:/app"
       - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    dockerOptions:
+      name: "candlethrob_prod_validate_{{ execution.id }}"
     timeout: PT10M
 
-  - id: get_performance_metrics
+  # Get performance metrics
+  - id: get_prod_performance_metrics
     type: io.kestra.plugin.docker.Run
-    runIf: "{{ taskrun(transform_ticker_data).state == 'SUCCESS' }}"
+    runIf: "{{ taskrun(transform_prod_ticker_and_macro_data).state == 'SUCCESS' }}"
     containerImage: candlethrob:latest
     pullPolicy: NEVER
     commands: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 -c \"from CandleThrob.transform.transform_data import CompleteDataTransform; transformer = CompleteDataTransform(); metrics = transformer.get_performance_metrics(); print('PERFORMANCE_METRICS:', metrics)\""]
@@ -53,13 +64,52 @@ tasks:
     volumes:
       - "/tmp/kestra-wd:/app"
       - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    dockerOptions:
+      name: "candlethrob_prod_metrics_{{ execution.id }}"
     timeout: PT5M
 
+  # Generate production transformation summary
+  - id: generate_prod_transformation_summary
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ taskrun(validate_prod_transformation_results).state == 'SUCCESS' }}"
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    commands:
+      - "sh"
+      - "-c"
+      - |
+        echo '=== Production Transformation Summary ==='
+        echo 'Transformation completed at:' $(date)
+        echo 'Checking transformation results...'
+        if [ -f /app/data/transformation_results.json ]; then
+            echo 'Transformation results file found:'
+            cat /app/data/transformation_results.json | head -20
+        else
+            echo 'No transformation results file found'
+        fi
+        echo ''
+        echo 'Checking technical indicators...'
+        if [ -f /app/data/technical_indicators_summary.json ]; then
+            echo 'Technical indicators summary:'
+            cat /app/data/technical_indicators_summary.json | head -10
+        else
+            echo 'No technical indicators summary found'
+        fi
+        echo '=== Production Transformation Complete ==='
+    env:
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    dockerOptions:
+      name: "candlethrob_prod_summary_{{ execution.id }}"
+    timeout: PT2M
 
-  - id: end_transformation
+  - id: end_prod_transformation
     type: io.kestra.plugin.core.log.Log
-    runIf: "{{ taskrun(validate_transformation).state == 'SUCCESS' and taskrun(get_performance_metrics).state == 'SUCCESS' }}"
-    message: "Data transformation completed successfully"
+    runIf: "{{ taskrun(validate_prod_transformation_results).state == 'SUCCESS' and taskrun(get_prod_performance_metrics).state == 'SUCCESS' }}"
+    message: "🎉 Production data transformation completed successfully with 98+ technical indicators and macro data processing"
 
 triggers:
   - id: trigger_after_ingestion

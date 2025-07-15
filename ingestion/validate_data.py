@@ -591,7 +591,7 @@ class DataValidator:
                 os.makedirs(os.path.dirname(report_file), exist_ok=True)
                 
                 with open(report_file, 'w') as f:
-                    json.dump(report, f, indent=2)
+                    json.dump(report, f, indent=2, default=str)
                 
                 logger.logger.info(f"Comprehensive validation report generated with overall score: {overall_score:.2f}")
                 log_validation_success("validate_data", "comprehensive_report", 1)

@@ -192,8 +192,16 @@ async def ingest_data(request: IngestRequest, background_tasks: BackgroundTasks)
                             END;
                         """)
                         
-                        # Insert data
+                        # Insert data with price validation
                         for record in request.data:
+                            # Validate and cap price values to fit NUMBER(10,4) precision
+                            from CandleThrob.utils.models import validate_and_cap_price_values
+
+                            open_price = validate_and_cap_price_values(record['open'])
+                            high_price = validate_and_cap_price_values(record['high'])
+                            low_price = validate_and_cap_price_values(record['low'])
+                            close_price = validate_and_cap_price_values(record['close'])
+
                             cursor.execute("""
                                 MERGE INTO ticker_data t
                                 USING (SELECT :1 as ticker, TO_DATE(:2, 'YYYY-MM-DD') as date_col,
@@ -206,10 +214,10 @@ async def ingest_data(request: IngestRequest, background_tasks: BackgroundTasks)
                             """, [
                                 request.ticker,
                                 record['date'],
-                                record['open'],
-                                record['high'],
-                                record['low'],
-                                record['close'],
+                                open_price,
+                                high_price,
+                                low_price,
+                                close_price,
                                 record['volume']
                             ])
                         

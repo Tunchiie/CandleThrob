@@ -1,17 +1,18 @@
 # CandleThrob Documentation
 
-Welcome to the comprehensive documentation for CandleThrob, a financial data pipeline with Oracle Database storage and 113+ technical indicators.
+Welcome to CandleThrob, a production-ready financial data pipeline with Oracle Database storage and 98+ technical indicators.
 
 ## Overview
 
-CandleThrob is a production-ready financial data pipeline that processes S&P 500 and ETF data with advanced features including incremental loading, rate limiting, error handling, and comprehensive monitoring.
+CandleThrob processes S&P 500 and ETF data with advanced features including incremental loading, rate limiting, error handling, and comprehensive monitoring.
 
-## Documentation Structure
+## Essential Documentation
 
-### Core Modules
-- **[Ingestion Module](./ingestion/)** - Data ingestion with Oracle DB storage and incremental loading
-- **[Utils Module](./utils/)** - Database models, Oracle DB utilities, and helper functions
-- **[Tests](./tests/)** - Comprehensive test suite documentation
+### Core References
+- **[Quick Reference Guide](QUICK_REFERENCE.md)** - Essential commands and configurations
+- **[Transformation Flows](TRANSFORMATION_FLOWS_REFERENCE.md)** - Development and production transformation flows
+- **[Database Schemas](schemas.md)** - Database structure and models
+- **[TA-Lib Installation Guide](ingestion/TALIB_GUIDE.md)** - Technical analysis library setup
 
 ### Schema Documentation
 - **[Database Schemas](./schemas.md)** - Complete database schemas including 113+ technical indicators

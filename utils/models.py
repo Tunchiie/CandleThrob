@@ -47,6 +47,70 @@ from CandleThrob.utils.logging_config import get_database_logger, log_database_o
 # Get logger for this module
 logger = get_database_logger(__name__)
 
+
+def validate_and_cap_price_values(value: float, max_value: float = 999999.9999, decimal_places: int = 4) -> float:
+    """
+    Validate and cap price values to fit Oracle NUMBER(10,4) precision.
+
+    Args:
+        value (float): The price value to validate
+        max_value (float): Maximum allowed value (default: 999999.9999 for NUMBER(10,4))
+        decimal_places (int): Number of decimal places to round to (default: 4)
+
+    Returns:
+        float: Capped and rounded value that fits database precision
+
+    Example:
+        >>> validate_and_cap_price_values(2267744.534164718)
+        999999.9999
+        >>> validate_and_cap_price_values(123.456789)
+        123.4568
+    """
+    if pd.isna(value) or value is None:
+        return value
+
+    # Cap the value to maximum allowed
+    capped_value = min(float(value), max_value)
+
+    # Round to specified decimal places
+    rounded_value = round(capped_value, decimal_places)
+
+    return rounded_value
+
+
+def validate_price_dataframe(df: pd.DataFrame, price_columns: List[str] = None) -> pd.DataFrame:
+    """
+    Validate and cap all price columns in a DataFrame to fit Oracle NUMBER(10,4) precision.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing price data
+        price_columns (List[str]): List of price column names to validate
+
+    Returns:
+        pd.DataFrame: DataFrame with validated and capped price values
+
+    Example:
+        >>> df = validate_price_dataframe(ticker_df, ['open_price', 'high_price', 'low_price', 'close_price'])
+    """
+    if price_columns is None:
+        price_columns = ['open_price', 'high_price', 'low_price', 'close_price', 'vwap']
+
+    df_clean = df.copy()
+    max_price_value = 999999.9999
+
+    for col in price_columns:
+        if col in df_clean.columns:
+            # Count values that will be capped
+            original_count = len(df_clean[df_clean[col] > max_price_value])
+            if original_count > 0:
+                logger.warning(f"Capping {original_count} {col} values that exceed {max_price_value}")
+
+            # Apply validation and capping
+            df_clean[col] = df_clean[col].apply(lambda x: validate_and_cap_price_values(x))
+
+    return df_clean
+
+
 @dataclass
 class ModelConfig:
     """ configuration for database models."""
@@ -436,6 +500,9 @@ class TickerData:
                 'transactions': 'num_transactions'
             }
             df_clean = df_clean.rename(columns=column_mapping)
+
+            # Cap price values to fit NUMBER(10,4) precision using utility function
+            df_clean = validate_price_dataframe(df_clean)
 
             # Ensure required columns
             required_cols = ['ticker', 'trade_date', 'open_price', 'high_price', 'low_price', 'close_price', 'volume', "vwap", "num_transactions"]

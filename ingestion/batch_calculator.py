@@ -329,7 +329,7 @@ class BatchCalculator:
                 os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
                 
                 with open(schedule_file, 'w') as f:
-                    json.dump(results, f, indent=2)
+                    json.dump(results, f, indent=2, default=str)
                 
                 logger.info(f"Calculated {total_batches} batches for {total_tickers} tickers")
                 logger.info(f"Total estimated time: {total_time_minutes:.1f} minutes")
