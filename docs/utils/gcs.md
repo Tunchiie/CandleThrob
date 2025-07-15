@@ -524,3 +524,5 @@ print(f"Test file exists: {blob_exists('candlethrob-candata', 'test/sample.parqu
 4. **Data Validation**: Add schema validation and data quality checks
 5. **Compression Options**: Support different compression algorithms
 6. **Metadata Handling**: Enhanced metadata storage and retrieval
+
+**Author**: Adetunji Fasiku

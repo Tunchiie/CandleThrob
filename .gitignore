@@ -2,46 +2,283 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+.Python
+*.so
 
 # Virtual environments
 .venv/
-env/
 venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+*.ipynb
 
 # VSCode settings
 .vscode/
+*.code-workspace
 
-# SQLite database
+# PyCharm settings
+.idea/
+*.iml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
 sql/candlethrob.db
 
-# Environment variables & secrets
+# Environment variables & secrets (CRITICAL FOR PUBLIC REPO)
 *.env
 *.env.*
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.prod
 var.env
+candlethrob.env
+
+# OCI Configuration (NEVER commit these)
+.oci/
+oci_config
+oci_key.pem
+*.pem
+*.key
+
+# API Keys and Secrets (NEVER commit these)
 gcs_key.json
-*.json
+service-account-key.json
+polygon_api_key.txt
+fred_api_key.txt
+api_keys.txt
+tokens.txt
+credentials.txt
+
+# Oracle Wallet Files (NEVER commit these)
 /secrets/*
 /oracle_config/*
+/Wallet_*/*
+Wallet_*/
+wallet/
+wallet_*/
+*.ora
+*.ora.bak
 
-# CSV/data exports (optional, depends on what you want versioned)
+# Data files (exclude all data files except samples)
 data/*.csv
-!data/sample.csv  # (you can force-include samples if needed)
+data/*.parquet
+data/*.json
+data/*.xlsx
+data/*.xls
+!data/sample.csv
+!data/sample.parquet
 
-# Logs or temporary outputs
+# Logs and temporary outputs
 *.log
 *.tmp
+*.temp
+logs/
 outputs/
+temp/
+tmp/
 
 # OS-specific files
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
 
-# Jupyter notebook metadata (optional, but helps sometimes)
+# Docker (Keep templates, exclude actual configs)
+.dockerignore
+
+# Docker Compose - Environment specific files
+docker-compose.override.yml  # Keep this - it's for development
+.env.prod                    # NEVER commit - contains secrets
+docker-compose.local.yml
+docker-compose.*.local.yml
+
+# Docker volumes and data
+docker-data/
+docker-volumes/
+
+# Kestra data and runtime files
+kestra-data/
+kestra-data-backup-*/
+kestra-storage/
+/tmp/kestra-wd/
+
+# Jupyter notebook outputs
 notebooks/candlethrob_dataset.csv
+*.ipynb
 
-# GitHub workflows
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# IDE specific files
+*.sublime-project
+*.sublime-workspace
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Production data and runtime files
+production_data/
+prod_logs/
+runtime_data/
+
+# Backup files that might contain sensitive data
+*.backup
+backup_*/
+backups_*/
+
+# Performance and profiling
+*.prof
+*.profile
+*.pyprof
+
+# Memory dumps
+*.dump
+*.dmp
+
+# Temporary files
+*.tmp
+*.temp
+temp_*
+tmp_*
+
+# GitHub workflows (if not needed in repo)
 /.github/workflows/
 .github/workflows/*
+
+# Local configuration
+config.local.yml
+config.local.yaml
+settings.local.py
+
+# API keys and tokens
+api_keys.txt
+tokens.txt
+credentials.txt
+
+# Large data files
+*.h5
+*.hdf5
+*.feather
+*.pickle
+*.pkl
+
+# Model files
+*.model
+*.pkl
+*.joblib
+
+# Cache directories
+.cache/
+cache/
+__pycache__/
+
+# Node modules (if any frontend components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup directories
+backup/
+backups/
+*.backup/
+
+# Oracle wallet and configuration
+oracle_config/
+Wallet_*/
+wallet_*/
+
+# Local development files
+local_*
+dev_*
+test_*
+
+# Public Repository Safety - Additional Patterns
+# (These patterns catch common mistakes when making repo public)
+
+# Any file with "secret" in the name
+*secret*
+*SECRET*
+*Secret*
+
+# Any file with "key" in the name
+*key*
+*KEY*
+*Key*
+!requirements.txt  # Exception for requirements
+
+# Any file with "password" in the name
+*password*
+*PASSWORD*
+*Password*
+
+# Any file with "token" in the name
+*token*
+*TOKEN*
+*Token*
+
+# Any file with "credential" in the name
+*credential*
+*CREDENTIAL*
+*Credential*
+
+# Common sensitive file patterns
+config.prod.*
+config.production.*
+settings.prod.*
+settings.production.*
+
+# OCI specific patterns
+oci_*.json
+oci_*.pem
+oci_*.key
+compartment_*.txt
+tenancy_*.txt
+
+# Database connection strings (often contain passwords)
+connection_string.txt
+db_connection.txt
+oracle_connection.txt
+
+# Polygon.io and FRED API specific
+polygon_*.txt
+fred_*.txt
+api_config.txt
+
+# Any file ending with _prod or _production
+*_prod
+*_prod.*
+*_production
+*_production.*

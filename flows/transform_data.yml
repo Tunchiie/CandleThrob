@@ -1,0 +1,74 @@
+id: transform_data
+namespace: candlethrob.transform
+
+tasks:
+  - id: start_transformation
+    type: io.kestra.plugin.core.log.Log
+    message: "Starting data transformation after ingestion completion"
+
+  - id: validate_ingestion_completion
+    type: io.kestra.plugin.core.log.Log
+    message: "Validating that ingestion flow has completed successfully"
+
+  - id: transform_ticker_data
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    commands: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/transform/transform_data.py"]
+    env:
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    timeout: PT2H
+    retry:
+      type: constant
+      maxAttempt: 3
+      interval: PT10M
+
+  - id: validate_transformation
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ taskrun(transform_ticker_data).state == 'SUCCESS' }}"
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    commands: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 -c \"from CandleThrob.transform.transform_data import CompleteDataTransform; transformer = CompleteDataTransform(); validation = transformer.validate_transformation_results(); print('VALIDATION:', 'PASSED' if validation else 'FAILED'); exit(0 if validation else 1)\""]
+    env:
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    timeout: PT10M
+
+  - id: get_performance_metrics
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ taskrun(transform_ticker_data).state == 'SUCCESS' }}"
+    containerImage: candlethrob:latest
+    pullPolicy: NEVER
+    commands: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 -c \"from CandleThrob.transform.transform_data import CompleteDataTransform; transformer = CompleteDataTransform(); metrics = transformer.get_performance_metrics(); print('PERFORMANCE_METRICS:', metrics)\""]
+    env:
+      TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
+      ORA_PYTHON_DRIVER_TYPE: "thick"
+    volumes:
+      - "/tmp/kestra-wd:/app"
+      - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
+    timeout: PT5M
+
+
+  - id: end_transformation
+    type: io.kestra.plugin.core.log.Log
+    runIf: "{{ taskrun(validate_transformation).state == 'SUCCESS' and taskrun(get_performance_metrics).state == 'SUCCESS' }}"
+    message: "Data transformation completed successfully"
+
+triggers:
+  - id: trigger_after_ingestion
+    type: io.kestra.plugin.core.trigger.Flow
+    inputs:
+      waitForCompletion: true
+    preconditions:
+      id: ingest_data_daily
+      flows:
+        - namespace: candlethrob
+          flowId: ingest_daily_data
+          states: [SUCCESS]

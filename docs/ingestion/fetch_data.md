@@ -253,3 +253,5 @@ if ticker_data.empty:
 - **Rate Limiting**: Implemented proper delays for API compliance
 - **Logging**: Enhanced logging for better debugging
 - **Data Quality**: Improved data validation and cleaning
+
+**Author**: Adetunji Fasiku

@@ -503,3 +503,5 @@ The final enriched dataset contains 129+ columns:
 - Trading strategy development
 - Risk management systems
 - Financial research
+
+**Author**: Adetunji Fasiku

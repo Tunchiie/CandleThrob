@@ -2,7 +2,11 @@
 
 ## Overview
 
-This document provides a comprehensive overview of all data schemas used throughout the CandleThrob project. It covers DataFrame schemas for the data processing pipeline, database schemas for persistence, and the relationships between different data structures.
+This document provides a comprehensive overview of all data schemas used throughout the CandleThrob project. It covers DataFrame schemas for the data processing pipeline, Oracle database schemas for persistence, and the relationships between different data structures.
+
+**Author**: Adetunji Fasiku  
+**Version**: 3.0.0  
+**Last Updated**: 2025-07-14
 
 ## Table of Contents
 
@@ -11,48 +15,93 @@ This document provides a comprehensive overview of all data schemas used through
    - [Enriched Technical Indicators](#enriched-technical-indicators)
    - [Macroeconomic Data](#macroeconomic-data)
    - [Transformed Data](#transformed-data)
-2. [Database Schemas](#database-schemas)
+2. [Oracle Database Schemas](#oracle-database-schemas)
    - [TickerData Table](#tickerdata-table)
    - [MacroData Table](#macrodata-table)
    - [TransformedTickers Table](#transformedtickers-table)
    - [TransformedMacroData Table](#transformedmacrodata-table)
-3. [Data Flow and Relationships](#data-flow-and-relationships)
-4. [Schema Evolution](#schema-evolution)
-5. [Validation Rules](#validation-rules)
+3. [Advanced Features](#advanced-features)
+4. [Data Flow and Relationships](#data-flow-and-relationships)
+5. [Schema Evolution](#schema-evolution)
+6. [Validation Rules](#validation-rules)
 
 ## DataFrame Schemas
 
 ### Raw OHLCV Data
 
-**Source**: `fetch_data.py` - Output from Polygon API
-**Description**: Basic stock price and volume data
+**Source**: `fetch_data.py` - Output from Polygon API  
+**Description**: Basic stock price and volume data from Polygon.io API
 
 | Column | Type | Description | Required | Constraints |
 |--------|------|-------------|----------|-------------|
-| Date | datetime64[ns, UTC] | Trading date | Yes | Must be valid date, timezone-aware |
-| Ticker | object (string) | Stock symbol | Yes | 1-5 characters, uppercase |
-| Open | float64 | Opening price | Yes | > 0 |
-| High | float64 | Highest price | Yes | >= Open |
-| Low | float64 | Lowest price | Yes | <= Open, > 0 |
-| Close | float64 | Closing price | Yes | > 0 |
-| Volume | float64 | Trading volume | Yes | >= 0 |
+| timestamp | int64 | Unix timestamp (milliseconds) | Yes | Must be valid timestamp |
+| open | float64 | Opening price | Yes | > 0 |
+| high | float64 | Highest price | Yes | >= open |
+| low | float64 | Lowest price | Yes | <= open, > 0 |
+| close | float64 | Closing price | Yes | > 0 |
+| volume | float64 | Trading volume | Yes | >= 0 |
+| vwap | float64 | Volume-weighted average price | No | Can be null |
+| transactions | int64 | Number of transactions | No | Can be null |
+| ticker | object (string) | Stock symbol | Yes | 1-5 characters, uppercase |
+| trade_date | object (string) | Formatted date (YYYY-MM-DD) | Yes | Must be valid date string |
 
 **Example**:
 ```python
 {
-    'Date': '2023-01-03 00:00:00+00:00',
-    'Ticker': 'AAPL',
-    'Open': 130.28,
-    'High': 130.90,
-    'Low': 124.17,
-    'Close': 125.07,
-    'Volume': 112117471.0
+    'timestamp': 1704067200000,
+    'open': 130.28,
+    'high': 130.90,
+    'low': 124.17,
+    'close': 125.07,
+    'volume': 112117471.0,
+    'vwap': 127.45,
+    'transactions': 1234567,
+    'ticker': 'AAPL',
+    'trade_date': '2024-01-03'
 }
 ```
 
+**Data Quality Validation**:
+- Removes rows with null values in critical columns (`open`, `high`, `low`, `close`, `volume`)
+- Ensures positive values for all price and volume columns
+- Sorts by timestamp in ascending order
+- Validates OHLC relationships (high >= low, high >= open, high >= close, etc.)
+
+### Raw Macroeconomic Data
+
+**Source**: `fetch_data.py` - FRED API output  
+**Description**: Macroeconomic indicators from Federal Reserve Economic Data
+
+| Column | Type | Description | FRED Series |
+|--------|------|-------------|-------------|
+| date | datetime64[ns] | Observation date | Index |
+| series_id | object (string) | FRED series identifier | Yes | One of: FEDFUNDS, CPIAUCSL, UNRATE, GDP, GS10 |
+| value | float64 | Series value | Yes | Can be null for missing data |
+
+**Available Series**:
+- `FEDFUNDS`: Federal Funds Rate
+- `CPIAUCSL`: Consumer Price Index
+- `UNRATE`: Unemployment Rate
+- `GDP`: Gross Domestic Product
+- `GS10`: 10-Year Treasury Rate
+
+**Example**:
+```python
+{
+    'date': '2024-01-03 00:00:00',
+    'series_id': 'FEDFUNDS',
+    'value': 5.33
+}
+```
+
+**Data Quality Validation**:
+- Validates data quality using OHLCV validation framework
+- Removes series with excessive null values
+- Ensures proper date formatting and ordering
+
 ### Enriched Technical Indicators
 
-**Source**: `enrich_data.py` - TechnicalIndicators class output
+**Source**: `enrich_data.py` - TechnicalIndicators class output  
 **Description**: OHLCV data enriched with technical indicators and return calculations
 
 #### Core Columns (from Raw OHLCV)
@@ -161,24 +210,8 @@ All pattern columns are of type `float64` and return integer values:
 - CDLMORNINGSTAR, CDLEVENINGSTAR, CDLSHOOTINGSTAR
 - And 50+ additional candlestick patterns
 
-### Macroeconomic Data
+### Enriched Macroeconomic Data
 
-**Source**: `fetch_data.py` - FRED API output
-**Description**: Macroeconomic indicators from Federal Reserve Economic Data
-
-#### Raw Macro Data
-| Column | Type | Description | FRED Series |
-|--------|------|-------------|-------------|
-| Date | datetime64[ns] | Observation date | Index |
-| GDP | float64 | Gross Domestic Product | GDP |
-| UNRATE | float64 | Unemployment Rate | UNRATE |
-| FEDFUNDS | float64 | Federal Funds Rate | FEDFUNDS |
-| CPIAUCSL | float64 | Consumer Price Index | CPIAUCSL |
-| INDPRO | float64 | Industrial Production Index | INDPRO |
-| UMCSENT | float64 | Consumer Sentiment | UMCSENT |
-| RSAFS | float64 | Retail Sales | RSAFS |
-
-#### Enriched Macro Data
 **Source**: `enrich_data.py` - EnrichMacros class output
 
 ##### Lagged Variables (30, 60, 90 day lags)
@@ -202,7 +235,7 @@ All pattern columns are of type `float64` and return integer values:
 
 ### Transformed Data
 
-**Source**: `transform_data.py` - Final processed dataset
+**Source**: `transform_data.py` - Final processed dataset  
 **Description**: Merged ticker and macro data with additional features
 
 This schema combines all columns from:
@@ -215,255 +248,283 @@ Additional columns may include:
 - Cross-sectional rankings
 - Sector/industry classifications (if available)
 
-## Database Schemas
+## Oracle Database Schemas
 
 ### TickerData Table
 
-**Source**: `utils/models.py` - SQLAlchemy model
-**Purpose**: Persistent storage of stock price data
+**Source**: `utils/models.py` - TickerData class
+**Purpose**: Persistent storage of stock price data with advanced features
 
-```python
-class TickerData(Base):
-    __tablename__ = "ticker_data"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    ticker = Column(String(10), nullable=False, index=True)
-    date = Column(Date, nullable=False, index=True)
-    open_price = Column(Float, nullable=False)
-    high_price = Column(Float, nullable=False)
-    low_price = Column(Float, nullable=False)
-    close_price = Column(Float, nullable=False)
-    volume = Column(BigInteger, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+```sql
+CREATE TABLE ticker_data (
+    id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    ticker VARCHAR2(10) NOT NULL,
+    trade_date DATE NOT NULL,
+    open_price NUMBER(10,4) NOT NULL,
+    high_price NUMBER(10,4) NOT NULL,
+    low_price NUMBER(10,4) NOT NULL,
+    close_price NUMBER(10,4) NOT NULL,
+    volume NUMBER NOT NULL,
+    vwap NUMBER(10,4),
+    num_transactions NUMBER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-**Constraints**:
-- Primary key: `id`
-- Composite unique constraint: `(ticker, date)`
-- Indexes on: `ticker`, `date`, `id`
-- Database: Oracle DB optimized for financial time series data
-- Supports bulk inserts and incremental loading
-- Foreign key relationships: None
+**Indexes**:
+- `idx_ticker_data_ticker` on `ticker`
+- `idx_ticker_data_date` on `trade_date`
+- `idx_ticker_data_ticker_date` on `(ticker, trade_date)`
+
+**Advanced Features**:
+- Bulk insert operations with configurable batch sizes
+- Data validation and quality scoring
+- Performance monitoring and metrics collection
+- Retry logic with exponential backoff
+- Memory usage optimization
+- Comprehensive error handling and logging
 
 ### MacroData Table
 
-**Source**: `utils/models.py` - SQLAlchemy model
-**Purpose**: Persistent storage of macroeconomic indicators
+**Source**: `utils/models.py` - MacroData class
+**Purpose**: Persistent storage of macroeconomic indicators with advanced features
 
-```python
-class MacroData(Base):
-    __tablename__ = "macro_data"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, nullable=False, index=True)
-    series_id = Column(String(100), nullable=False, index=True)
-    value = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+```sql
+CREATE TABLE macro_data (
+    id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    trade_date DATE NOT NULL,
+    series_id VARCHAR2(100) NOT NULL,
+    value NUMBER(15,6),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-**Constraints**:
-- Primary key: `id`
-- Composite unique constraint: `(date, series_id)`
-- Indexes on: `date`, `series_id`, `id`
-- Database: Oracle DB with support for incremental loading
-- Supports bulk inserts for large datasets
-- Foreign key relationships: None
+**Indexes**:
+- `idx_macro_data_series` on `series_id`
+- `idx_macro_data_date` on `trade_date`
+
+**Key Features**:
+- Incremental loading support
+- Data quality validation
+- Performance monitoring
+- Bulk operations optimization
+- Comprehensive error handling
 
 ### TransformedTickers Table
 
-**Source**: `utils/models.py` - SQLAlchemy model
+**Source**: `utils/models.py` - AdvancedTransformedTickers class  
 **Purpose**: Storage of processed data with comprehensive technical indicators
 
-```python
-class TransformedTickers(Base):
-    __tablename__ = "transformed_tickers"
+```sql
+CREATE TABLE transformed_tickers (
+    id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    ticker VARCHAR2(10) NOT NULL,
+    trans_date DATE NOT NULL,
     
-    id = Column(Integer, primary_key=True, index=True)
-    ticker = Column(String(10), nullable=False, index=True)
-    date = Column(Date, nullable=False, index=True)
+    -- OHLCV Data
+    open_price BINARY_DOUBLE,
+    high_price BINARY_DOUBLE,
+    low_price BINARY_DOUBLE,
+    close_price BINARY_DOUBLE,
+    volume NUMBER,
+    vwap NUMBER(10,4),
+    num_transactions NUMBER,
     
-    # OHLCV Data
-    open_price = Column(Float)
-    high_price = Column(Float)
-    low_price = Column(Float)
-    close_price = Column(Float)
-    volume = Column(BigInteger)
+    -- Return Calculations (6 indicators)
+    return_1d BINARY_DOUBLE,
+    return_3d BINARY_DOUBLE,
+    return_7d BINARY_DOUBLE,
+    return_30d BINARY_DOUBLE,
+    return_90d BINARY_DOUBLE,
+    return_365d BINARY_DOUBLE,
     
-    # Return Calculations (6 indicators)
-    return_1d = Column(Float)
-    return_3d = Column(Float)
-    return_7d = Column(Float)
-    return_30d = Column(Float)
-    return_90d = Column(Float)
-    return_365d = Column(Float)
+    -- Momentum Indicators (21 indicators)
+    rsi BINARY_DOUBLE,
+    macd BINARY_DOUBLE,
+    macd_signal BINARY_DOUBLE,
+    macd_hist BINARY_DOUBLE,
+    stoch_k BINARY_DOUBLE,
+    stoch_d BINARY_DOUBLE,
+    cci BINARY_DOUBLE,
+    roc BINARY_DOUBLE,
+    mom BINARY_DOUBLE,
+    trix BINARY_DOUBLE,
+    willr BINARY_DOUBLE,
+    sma10 BINARY_DOUBLE,
+    sma20 BINARY_DOUBLE,
+    sma50 BINARY_DOUBLE,
+    sma100 BINARY_DOUBLE,
+    sma200 BINARY_DOUBLE,
+    ema10 BINARY_DOUBLE,
+    ema20 BINARY_DOUBLE,
+    ema50 BINARY_DOUBLE,
+    ema100 BINARY_DOUBLE,
+    ema200 BINARY_DOUBLE,
     
-    # Momentum Indicators (21 indicators)
-    rsi = Column(Float)
-    macd = Column(Float)
-    macd_signal = Column(Float)
-    macd_hist = Column(Float)
-    stoch_k = Column(Float)
-    stoch_d = Column(Float)
-    cci = Column(Float)
-    roc = Column(Float)
-    mom = Column(Float)
-    trix = Column(Float)
-    willr = Column(Float)
-    sma10 = Column(Float)
-    sma20 = Column(Float)
-    sma50 = Column(Float)
-    sma100 = Column(Float)
-    sma200 = Column(Float)
-    ema10 = Column(Float)
-    ema20 = Column(Float)
-    ema50 = Column(Float)
-    ema100 = Column(Float)
-    ema200 = Column(Float)
+    -- Volume Indicators (9 indicators)
+    obv BINARY_DOUBLE,
+    ad BINARY_DOUBLE,
+    mfi BINARY_DOUBLE,
+    adosc BINARY_DOUBLE,
+    cmf BINARY_DOUBLE,
+    vwap BINARY_DOUBLE,
+    vpt BINARY_DOUBLE,
+    adx BINARY_DOUBLE,
+    rvol BINARY_DOUBLE,
     
-    # Volume Indicators (9 indicators)
-    obv = Column(Float)
-    ad = Column(Float)
-    mfi = Column(Float)
-    adosc = Column(Float)
-    cmf = Column(Float)
-    vwap = Column(Float)
-    vpt = Column(Float)
-    adx = Column(Float)
-    rvol = Column(Float)
+    -- Volatility Indicators (9 indicators)
+    atr BINARY_DOUBLE,
+    natr BINARY_DOUBLE,
+    trange BINARY_DOUBLE,
+    bbands_upper BINARY_DOUBLE,
+    bbands_middle BINARY_DOUBLE,
+    bbands_lower BINARY_DOUBLE,
+    ulcer_index BINARY_DOUBLE,
+    donch_upper BINARY_DOUBLE,
+    donch_lower BINARY_DOUBLE,
     
-    # Volatility Indicators (9 indicators)
-    atr = Column(Float)
-    natr = Column(Float)
-    trange = Column(Float)
-    bbands_upper = Column(Float)
-    bbands_middle = Column(Float)
-    bbands_lower = Column(Float)
-    ulcer_index = Column(Float)
-    donch_upper = Column(Float)
-    donch_lower = Column(Float)
+    -- Price Indicators (5 indicators)
+    midprice BINARY_DOUBLE,
+    medprice BINARY_DOUBLE,
+    typprice BINARY_DOUBLE,
+    wclprice BINARY_DOUBLE,
+    avgprice BINARY_DOUBLE,
     
-    # Price Indicators (5 indicators)
-    midprice = Column(Float)
-    medprice = Column(Float)
-    typprice = Column(Float)
-    wclprice = Column(Float)
-    avgprice = Column(Float)
+    -- Cyclical Indicators (5 indicators)
+    ht_trendline BINARY_DOUBLE,
+    ht_sine BINARY_DOUBLE,
+    ht_sine_lead BINARY_DOUBLE,
+    ht_dcperiod BINARY_DOUBLE,
+    ht_dcphase BINARY_DOUBLE,
     
-    # Cyclical Indicators (5 indicators)
-    ht_trendline = Column(Float)
-    ht_sine = Column(Float)
-    ht_sine_lead = Column(Float)
-    ht_dcperiod = Column(Float)
-    ht_dcphase = Column(Float)
+    -- Statistical Indicators (4 indicators)
+    stddev BINARY_DOUBLE,
+    var BINARY_DOUBLE,
+    beta_vs_sp500 BINARY_DOUBLE,
+    zscore_price_normalized BINARY_DOUBLE,
     
-    # Statistical Indicators (4 indicators)
-    stddev = Column(Float)
-    var = Column(Float)
-    beta_vs_sp500 = Column(Float)
-    zscore_price_normalized = Column(Float)
+    -- Candlestick Pattern Recognition (54 patterns)
+    cdl2crows BINARY_DOUBLE,
+    cdl3blackcrows BINARY_DOUBLE,
+    cdl3inside BINARY_DOUBLE,
+    cdl3linestrike BINARY_DOUBLE,
+    cdl3outside BINARY_DOUBLE,
+    cdl3starsinsouth BINARY_DOUBLE,
+    cdl3whitesoldiers BINARY_DOUBLE,
+    cdlabandonedbaby BINARY_DOUBLE,
+    cdlbelthold BINARY_DOUBLE,
+    cdlbreakaway BINARY_DOUBLE,
+    cdlclosingmarubozu BINARY_DOUBLE,
+    cdlconcealbabyswall BINARY_DOUBLE,
+    cdlcounterattack BINARY_DOUBLE,
+    cdldarkcloudcover BINARY_DOUBLE,
+    cdldoji BINARY_DOUBLE,
+    cdldojistar BINARY_DOUBLE,
+    cdlengulfing BINARY_DOUBLE,
+    cdleveningstar BINARY_DOUBLE,
+    cdlgravestonedoji BINARY_DOUBLE,
+    cdlhammer BINARY_DOUBLE,
+    cdlhangingman BINARY_DOUBLE,
+    cdlharami BINARY_DOUBLE,
+    cdlharamicross BINARY_DOUBLE,
+    cdlhighwave BINARY_DOUBLE,
+    cdlhikkake BINARY_DOUBLE,
+    cdlhikkakemod BINARY_DOUBLE,
+    cdlhomingpigeon BINARY_DOUBLE,
+    cdlidentical3crows BINARY_DOUBLE,
+    cdlinneck BINARY_DOUBLE,
+    cdlinvertedhammer BINARY_DOUBLE,
+    cdlladderbottom BINARY_DOUBLE,
+    cdllongleggeddoji BINARY_DOUBLE,
+    cdllongline BINARY_DOUBLE,
+    cdlmarubozu BINARY_DOUBLE,
+    cdlmatchinglow BINARY_DOUBLE,
+    cdlmathold BINARY_DOUBLE,
+    cdlmorningdojistar BINARY_DOUBLE,
+    cdlmorningstar BINARY_DOUBLE,
+    cdlonneck BINARY_DOUBLE,
+    cdlpiercing BINARY_DOUBLE,
+    cdlrickshawman BINARY_DOUBLE,
+    cdlrisefall3methods BINARY_DOUBLE,
+    cdlseparatinglines BINARY_DOUBLE,
+    cdlshootingstar BINARY_DOUBLE,
+    cdlshortline BINARY_DOUBLE,
+    cdlspinningtop BINARY_DOUBLE,
+    cdlstalledpattern BINARY_DOUBLE,
+    cdlsticksandwich BINARY_DOUBLE,
+    cdltakuri BINARY_DOUBLE,
+    cdltasukigap BINARY_DOUBLE,
+    cdlthrusting BINARY_DOUBLE,
+    cdltristar BINARY_DOUBLE,
+    cdlunique3river BINARY_DOUBLE,
+    cdlxsidegap3methods BINARY_DOUBLE,
     
-    # Candlestick Pattern Recognition (54 patterns)
-    # All patterns return: 100 = Bullish, 0 = No pattern, -100 = Bearish
-    cdl2crows = Column(Float)
-    cdl3blackcrows = Column(Float)
-    cdl3inside = Column(Float)
-    cdl3linestrike = Column(Float)
-    cdl3outside = Column(Float)
-    cdl3starsinsouth = Column(Float)
-    cdl3whitesoldiers = Column(Float)
-    cdlabandonedbaby = Column(Float)
-    cdlbelthold = Column(Float)
-    cdlbreakaway = Column(Float)
-    cdlclosingmarubozu = Column(Float)
-    cdlconcealbabyswall = Column(Float)
-    cdlcounterattack = Column(Float)
-    cdldarkcloudcover = Column(Float)
-    cdldoji = Column(Float)
-    cdldojistar = Column(Float)
-    cdlengulfing = Column(Float)
-    cdleveningstar = Column(Float)
-    cdlgravestonedoji = Column(Float)
-    cdlhammer = Column(Float)
-    cdlhangingman = Column(Float)
-    cdlharami = Column(Float)
-    cdlharamicross = Column(Float)
-    cdlhighwave = Column(Float)
-    cdlhikkake = Column(Float)
-    cdlhikkakemod = Column(Float)
-    cdlhomingpigeon = Column(Float)
-    cdlidentical3crows = Column(Float)
-    cdlinneck = Column(Float)
-    cdlinvertedhammer = Column(Float)
-    cdlladderbottom = Column(Float)
-    cdllongleggeddoji = Column(Float)
-    cdllongline = Column(Float)
-    cdlmarubozu = Column(Float)
-    cdlmatchinglow = Column(Float)
-    cdlmathold = Column(Float)
-    cdlmorningdojistar = Column(Float)
-    cdlmorningstar = Column(Float)
-    cdlonneck = Column(Float)
-    cdlpiercing = Column(Float)
-    cdlrickshawman = Column(Float)
-    cdlrisefall3methods = Column(Float)
-    cdlseparatinglines = Column(Float)
-    cdlshootingstar = Column(Float)
-    cdlshortline = Column(Float)
-    cdlspinningtop = Column(Float)
-    cdlstalledpattern = Column(Float)
-    cdlsticksandwich = Column(Float)
-    cdltakuri = Column(Float)
-    cdltasukigap = Column(Float)
-    cdlthrusting = Column(Float)
-    cdltristar = Column(Float)
-    cdlunique3river = Column(Float)
-    cdlxsidegap3methods = Column(Float)
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
+**Indexes**:
+- `idx_transformed_tickers_ticker` on `ticker`
+- `idx_transformed_tickers_date` on `trans_date`
+- `idx_transformed_tickers_ticker_date` on `(ticker, trans_date)`
+
 **Total Columns**: 113+ technical indicators and candlestick patterns
-- **Base columns**: 8 (id, ticker, date, OHLCV, metadata)
+- **Base columns**: 8 (id, ticker, trans_date, OHLCV, metadata)
 - **Technical indicators**: 59 (returns, momentum, volume, volatility, price, cyclical, statistical)
 - **Candlestick patterns**: 54 pattern recognition indicators
 
-**Constraints**:
-- Primary key: `id`
-- Composite unique constraint: `(ticker, date)`
-- Indexes on: `ticker`, `date`, `id`
-- Foreign key relationships: None
-
 ### TransformedMacroData Table
 
-**Source**: `utils/models.py` - SQLAlchemy model
+**Source**: `utils/models.py` - AdvancedTransformedMacroData class  
 **Purpose**: Storage of transformed macroeconomic data with enrichments
 
-```python
-class TransformedMacroData(Base):
-    __tablename__ = "transformed_macro_data"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, nullable=False, index=True)
-    series_id = Column(String(100), nullable=False, index=True)
-    value = Column(Float, nullable=True)
-    normalized_value = Column(Float)
-    moving_avg_30 = Column(Float)
-    year_over_year_change = Column(Float)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+```sql
+CREATE TABLE transformed_macro_data (
+    id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    trans_date DATE NOT NULL,
+    series_id VARCHAR2(100) NOT NULL,
+    value BINARY_DOUBLE,
+    normalized_value BINARY_DOUBLE,
+    moving_avg_30 BINARY_DOUBLE,
+    year_over_year_change BINARY_DOUBLE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-**Constraints**:
-- Primary key: `id`
-- Composite unique constraint: `(date, series_id)`
-- Indexes on: `date`, `series_id`, `id`
-- Database: Oracle DB with support for incremental macro data loading
-- Supports bulk inserts for enriched macro indicators
-- Foreign key relationships: None
+**Indexes**:
+- `idx_transformed_macro_data_series` on `series_id`
+- `idx_transformed_macro_data_date` on `trans_date`
+
+## Advanced Features
+
+### Performance Monitoring
+- Real-time operation tracking
+- Duration and success rate metrics
+- Memory usage optimization
+- Bulk operation performance analysis
+
+### Data Validation
+- Comprehensive DataFrame validation
+- Data quality scoring (0.0-1.0 scale)
+- Type checking and null validation
+- Price consistency validation
+
+### Error Handling
+- Retry logic with exponential backoff
+- Comprehensive error categorization
+- Detailed logging and audit trails
+- Graceful failure handling
+
+### Configuration Management
+- Configurable batch sizes
+- Memory usage limits
+- Data quality thresholds
+- Performance monitoring settings
 
 ## Data Flow and Relationships
 
@@ -492,19 +553,22 @@ class TransformedMacroData(Base):
 
 #### DataFrame to Database Mapping
 
-| DataFrame Schema | Database Table | Mapping Notes |
-|------------------|----------------|---------------|
-| Raw OHLCV Data | TickerData | Direct 1:1 mapping with column renaming |
-| Macroeconomic Data | MacroData | Pivoted: one row per (date, series_id) |
-| Enriched Technical Indicators | TransformedTickers | 113+ technical and pattern indicators |
-| Enriched Macro Data | TransformedMacroData | Normalized values with statistical features |
+| DataFrame Schema | Database Table | Column Mapping |
+|------------------|----------------|----------------|
+| Raw OHLCV Data | TickerData | `timestamp` → N/A (not stored)<br>`open` → `open_price`<br>`high` → `high_price`<br>`low` → `low_price`<br>`close` → `close_price`<br>`volume` → `volume`<br>`vwap` → `vwap`<br>`transactions` → `num_transactions`<br>`ticker` → `ticker`<br>`trade_date` → `trade_date` |
+| Raw Macroeconomic Data | MacroData | `date` → `trade_date`<br>`series_id` → `series_id`<br>`value` → `value` |
+| Enriched Technical Indicators | TransformedTickers | All technical indicators mapped with snake_case naming<br>`ticker` → `ticker`<br>`trade_date` → `trans_date` |
+| Enriched Macro Data | TransformedMacroData | `date` → `trans_date`<br>`series_id` → `series_id`<br>`value` → `value`<br>+ enriched columns |
 
 #### Key Relationships
 
-1. **Date-based Joins**: All schemas use `Date` as a primary join key
-2. **Ticker Grouping**: Stock data is grouped by `Ticker` symbol
+1. **Date-based Joins**: All schemas use date fields as primary join keys
+2. **Ticker Grouping**: Stock data is grouped by `ticker` symbol
 3. **Time Series Nature**: All data is time-ordered and can be analyzed as time series
 4. **Hierarchical Structure**: Raw → Enriched → Transformed represents increasing levels of processing
+5. **Column Naming Convention**: 
+   - DataFrame: camelCase (e.g., `open`, `high`, `close`)
+   - Database: snake_case (e.g., `open_price`, `high_price`, `close_price`)
 
 ## Schema Evolution
 
@@ -515,17 +579,26 @@ class TransformedMacroData(Base):
 - Limited technical indicators
 - Simple macro data integration
 
-#### v2.0 (Current)
+#### v2.0 (Previous)
 - Comprehensive technical indicators (100+ columns)
 - Advanced macro data transformations
 - Candlestick pattern recognition
 - Enhanced database schemas with proper indexing
+
+#### v3.0 (Current - Professional Grade)
+- Oracle database optimization
+- Advanced error handling and retry logic
+- Performance monitoring and metrics collection
+- Advanced data validation and quality scoring
+- Memory optimization and bulk operations
+- Comprehensive audit trails and logging
 
 #### Future Considerations
 - Additional data sources (news sentiment, options data)
 - Real-time streaming schemas
 - Partitioning strategies for large datasets
 - Data quality and lineage tracking
+- Machine learning model integration
 
 ## Validation Rules
 
@@ -574,9 +647,9 @@ assert (df['BBANDS_MIDDLE'] >= df['BBANDS_LOWER']).all(), "Middle >= Lower band"
 #### Indexing Strategy
 ```sql
 -- Recommended database indexes
-CREATE INDEX idx_ticker_date ON ticker_data(ticker, date);
-CREATE INDEX idx_date_ticker ON ticker_data(date, ticker);
-CREATE INDEX idx_macro_date_series ON macro_data(date, series_id);
+CREATE INDEX idx_ticker_date ON ticker_data(ticker, trade_date);
+CREATE INDEX idx_date_ticker ON ticker_data(trade_date, ticker);
+CREATE INDEX idx_macro_date_series ON macro_data(trade_date, series_id);
 ```
 
 #### Memory Optimization
@@ -605,6 +678,31 @@ momentum_cols = [col for col in enriched_data.columns if col.startswith(('RSI', 
 volume_cols = [col for col in enriched_data.columns if col.startswith(('OBV', 'AD', 'MFI'))]
 ```
 
+### Advanced Model Usage
+
+```python
+# Initialize advanced model
+from utils.models import TickerData, ModelConfig
+
+config = ModelConfig(
+    max_insert_batch_size=10000,
+    enable_data_validation=True,
+    min_data_quality_score=0.8
+)
+
+model = TickerData(config)
+
+# Create table and insert data
+with db.establish_connection() as conn:
+    with conn.cursor() as cursor:
+        model.create_table(cursor)
+        model.insert_data(conn, ticker_df)
+
+# Get performance metrics
+metrics = model.get_performance_metrics()
+print(f"Data quality score: {metrics['quality_score']}")
+```
+
 ### Schema Inspection
 
 ```python
@@ -622,3 +720,5 @@ def validate_ohlcv_schema(df):
 ```
 
 This schema documentation serves as the authoritative reference for all data structures used in the CandleThrob project, ensuring consistency across the entire data pipeline.
+
+**Author**: Adetunji Fasiku

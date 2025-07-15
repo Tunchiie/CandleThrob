@@ -450,3 +450,5 @@ If TA-Lib is unavailable, CandleThrob calculates basic indicators manually:
 - Basic return metrics
 
 This ensures the pipeline remains functional even without TA-Lib installation.
+
+**Author**: Adetunji Fasiku

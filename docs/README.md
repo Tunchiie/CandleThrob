@@ -1,10 +1,10 @@
 # CandleThrob Documentation
 
-Welcome to the comprehensive documentation for CandleThrob, an industry-grade financial data pipeline with Oracle Database storage and 113+ technical indicators.
+Welcome to the comprehensive documentation for CandleThrob, a financial data pipeline with Oracle Database storage and 113+ technical indicators.
 
 ## Overview
 
-CandleThrob is a production-ready financial data pipeline that processes S&P 500 and ETF data with enterprise-grade features including incremental loading, rate limiting, error handling, and comprehensive monitoring.
+CandleThrob is a production-ready financial data pipeline that processes S&P 500 and ETF data with advanced features including incremental loading, rate limiting, error handling, and comprehensive monitoring.
 
 ## Documentation Structure
 
@@ -19,9 +19,11 @@ CandleThrob is a production-ready financial data pipeline that processes S&P 500
 - **[Oracle DB Utilities](./utils/oracledb.md)** - Database connection and management
 
 ### Technical Documentation
-- **[Complete Data Ingestion](./ingestion/ingest_data_complete.md)** - Industry-grade data ingestion pipeline
 - **[Data Fetching](./ingestion/fetch_data.md)** - API integration for Polygon.io and FRED
-- **[Technical Enrichment](./ingestion/enrich_data.md)** - 113+ technical indicators calculation
+- **[Data Ingestion](./ingestion/ingest_data.md)** - Complete data ingestion pipeline
+- **[Technical Enrichment](./transform/enrich_data.md)** - 113+ technical indicators calculation
+- **[Data Transformation](./transform/transform_data.md)** - Data transformation pipeline
+- **[TA-Lib Guide](./ingestion/TALIB_GUIDE.md)** - Installation and troubleshooting
 
 ## Quick Start
 
@@ -37,7 +39,7 @@ with db.establish_connection() as conn:
 
 ### 2. Data Ingestion
 ```python
-from CandleThrob.ingestion.ingest_data_complete import main
+from CandleThrob.ingestion.ingest_data import main
 
 # Process all 523 tickers (503 S&P 500 + 20 ETFs)
 main()
@@ -45,17 +47,18 @@ main()
 
 ### 3. Technical Analysis
 ```python
-from CandleThrob.ingestion.enrich_data import TechnicalEnrichment
+from CandleThrob.transform.enrich_data import TechnicalIndicators
 
+ticker_data = ...  # Your DataFrame with OHLCV data
 # Calculate 113+ technical indicators
-enrichment = TechnicalEnrichment()
-enrichment.calculate_all_indicators()
+indicators = TechnicalIndicators(ticker_data)
+transformed_data = indicators.transform()
 ```
 
 ## Architecture
 
 ```
-CandleThrob Enterprise Pipeline:
+CandleThrob Data Pipeline:
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Polygon.io    │───▶│   Raw Ingestion  │───▶│   Oracle DB     │
 │   (OHLCV Data)  │    │   (ticker_data)  │    │ (ticker_data)   │
@@ -75,7 +78,7 @@ CandleThrob Enterprise Pipeline:
 
 ## Key Features
 
-### Enterprise-Grade Data Ingestion
+### Advanced Data Ingestion
 - **Complete Processing**: All 523 tickers (503 S&P 500 + 20 ETFs) in one execution
 - **Stateful Batching**: Automatic batch progression with state management
 - **Rate Limiting**: Polygon.io API compliance (5 calls/minute)
@@ -167,7 +170,7 @@ POLYGON_RATE_LIMIT=12
 - id: process_all_batches
   type: io.kestra.plugin.docker.Run
   containerImage: candlethrob:latest
-  command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data_complete.py"]
+  command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"]
   env:
     BATCH_SIZE: "25"
     POLYGON_RATE_LIMIT: "12"
@@ -204,7 +207,7 @@ POLYGON_RATE_LIMIT=12
 
 When contributing to CandleThrob:
 
-1. **Code Quality**: Follow industry standards with comprehensive type hints
+1. **Code Quality**: Follow best practices with comprehensive type hints
 2. **Documentation**: Add detailed docstrings for all functions and classes
 3. **Testing**: Include unit tests for new functionality
 4. **Error Handling**: Implement comprehensive error handling and retry logic
@@ -220,7 +223,7 @@ When contributing to CandleThrob:
 
 ## Version History
 
-- **v2.0.0** (2025-07-13): Complete rewrite with industry-grade practices
+- **v2.0.0** (2025-07-13): Complete rewrite with best practices
 - **v1.0.0**: Initial implementation
 
 ## Support
@@ -235,4 +238,4 @@ For technical support or questions:
 
 **Last Updated**: July 13, 2025  
 **Version**: 2.0.0  
-**Author**: CandleThrob Team
+**Author**: Adetunji Fasiku

@@ -1,0 +1,107 @@
+id: ingest_data_optimized
+namespace: candlethrob.ingestion
+
+description: "Optimized daily ingestion using development image with embedded wallet"
+
+tasks:
+  - id: start_optimized_ingestion
+    type: io.kestra.plugin.core.log.Log
+    message: "Starting optimized daily ingestion using development image with embedded wallet"
+
+  # Main ingestion using development image with embedded wallet
+  - id: run_complete_ingestion
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command: ["python", "-m", "CandleThrob.ingestion.ingest_data"]
+    env:
+      BATCH_SIZE: "25"
+      POLYGON_RATE_LIMIT: "12"
+      # Development image has embedded Oracle wallet and OCI configuration
+    timeout: PT4H
+    retry:
+      type: constant
+      maxAttempt: 3
+      interval: PT5M
+
+  # Check if ingestion completed successfully
+  - id: check_ingestion_status
+    type: io.kestra.plugin.docker.Run
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command:
+      - "sh"
+      - "-c"
+      - |
+        if [ -f /app/data/batch_cycle_complete.flag ]; then
+            echo 'INGESTION_COMPLETE'
+            cat /app/data/batch_cycle_complete.flag
+        else
+            echo 'INGESTION_INCOMPLETE'
+            exit 1
+        fi
+    timeout: PT1M
+
+  # Update macro data if ingestion was successful
+  - id: update_macro_data
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.check_ingestion_status.stdout | trim | startsWith('INGESTION_COMPLETE') }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command: ["python", "-m", "CandleThrob.ingestion.update_macro"]
+    timeout: PT30M
+    retry:
+      type: constant
+      maxAttempt: 2
+      interval: PT5M
+
+  # Validate data quality
+  - id: validate_data_quality
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.update_macro_data.exitCode == 0 }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command: ["python", "-m", "CandleThrob.ingestion.validate_data"]
+    timeout: PT15M
+
+  # Clean up flags and generate summary
+  - id: cleanup_and_summary
+    type: io.kestra.plugin.docker.Run
+    runIf: "{{ outputs.validate_data_quality.exitCode == 0 }}"
+    containerImage: candlethrob:dev
+    pullPolicy: NEVER
+    networkMode: host
+    command:
+      - "sh"
+      - "-c"
+      - |
+        echo '=== Daily Ingestion Summary ==='
+        echo 'Ingestion completed at:' $(date)
+        echo 'Checking results...'
+        if [ -f /app/data/ingestion_results.json ]; then
+            echo 'Results file found:'
+            cat /app/data/ingestion_results.json | head -20
+        else
+            echo 'No results file found'
+        fi
+        echo ''
+        echo 'Cleaning up flags...'
+        rm -f /app/data/batch_cycle_complete.flag
+        echo 'Cleanup completed'
+        echo '=== Summary Complete ==='
+    timeout: PT2M
+
+  - id: completion_message
+    type: io.kestra.plugin.core.log.Log
+    runIf: "{{ outputs.cleanup_and_summary.exitCode == 0 }}"
+    message: "✅ Optimized daily ingestion pipeline completed successfully!"
+
+triggers:
+  - id: schedule_optimized_daily
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 21 * * 1-5" # 9 PM EST on weekdays
+    timezone: America/New_York

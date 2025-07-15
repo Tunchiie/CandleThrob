@@ -142,7 +142,7 @@ if not TALIB_AVAILABLE or df.empty:
 ```
 
 **Benefits:**
-- **Professional-Grade**: Industry-standard indicator calculations
+- **Professional-Grade**: Professional indicator calculations
 - **Extensive Library**: Access to 150+ indicators
 - **Pattern Recognition**: Advanced candlestick pattern detection
 - **Performance**: C-compiled functions for speed
@@ -516,3 +516,5 @@ print(f"Columns: {df.columns.tolist()}")
 2. **Cloud Resources**: Consider more powerful compute instances
 3. **Storage Optimization**: Implement data partitioning strategies
 4. **Monitoring**: Add detailed performance metrics
+
+**Author**: Adetunji Fasiku

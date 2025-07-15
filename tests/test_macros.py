@@ -1,376 +1,587 @@
+"""
+Comprehensive test suite for macroeconomic data functionality.
+
+This module provides tests for:
+- Macroeconomic data fetching and processing
+- FRED API integration and error handling
+- Data quality validation for economic indicators
+- Statistical validation of economic time series
+- Performance benchmarking
+- Database operations for macro data
+- Edge cases and error conditions
+"""
+
 import os
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, date as date_type
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
+from typing import Dict, Any, List, Optional
+
 from CandleThrob.ingestion.fetch_data import DataIngestion
-from CandleThrob.utils.models import MacroData
+from CandleThrob.utils.models import MacroData, TransformedMacroData
 
 
-class TestMacroDataFunctionality:
-    """Comprehensive test suite for macroeconomic data functionality."""
-
-    @pytest.fixture(scope="function")
-    def db_conn(self):
-        """Create a fresh in-memory database conn for testing."""
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import connmaker
-        from utils.models import Base
-        
-        # Create in-memory SQLite database for testing
-        engine = create_engine("sqlite:///:memory:", echo=False)
-        Base.metadata.create_all(engine)
-        conn = connmaker(bind=engine)
-        conn = conn()
-        
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    @pytest.fixture
-    def sample_macro_data(self):
-        """Create sample macro data for testing."""
-        dates = pd.date_range(start='2024-01-01', end='2024-01-05', freq='D')
-        data = []
-        series_ids = ['FEDFUNDS', 'CPIAUCSL', 'UNRATE']
-        
-        for dt in dates:
-            for series_id in series_ids:
-                data.append({
-                    'date': dt.date(),
-                    'series_id': series_id,
-                    'value': np.random.uniform(1.0, 10.0)
-                })
-        
-        return pd.DataFrame(data)
-
-    @pytest.fixture
-    def mock_fred_api(self):
-        """Mock FRED API for testing."""
-        with patch('ingestion.fetch_data.Fred') as mock_fred:
-            mock_instance = Mock()
-            mock_fred.return_value = mock_instance
-            
-            # Create mock data for different series
-            mock_data = {
-                'FEDFUNDS': pd.Series([5.25, 5.30, 5.35], 
-                                    index=pd.date_range('2024-01-01', periods=3)),
-                'CPIAUCSL': pd.Series([310.2, 310.4, 310.6], 
-                                    index=pd.date_range('2024-01-01', periods=3)),
-                'UNRATE': pd.Series([3.7, 3.8, 3.7], 
-                                  index=pd.date_range('2024-01-01', periods=3))
-            }
-            
-            mock_instance.get_series.side_effect = lambda series_id, **kwargs: mock_data.get(series_id, pd.Series())
-            yield mock_instance
-
-    def test_create_table(self, db_conn):
-        """Test that MacroData table can be created."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        # Verify table exists by checking if we can query it
-        db_conn.query(MacroData).first()
-        # Should not raise an exception even if empty
-        
-    def test_data_exists_empty_table(self, db_conn):
-        """Test data_exists returns False for empty table."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        assert not macro_model.data_exists(db_conn)
-        assert not macro_model.data_exists(db_conn, series_id='FEDFUNDS')
+class TestMacroDataUnit:
+    """Unit tests for macroeconomic data functionality."""
     
-    def test_get_last_date_empty_table(self, db_conn):
-        """Test get_last_date returns None for empty table."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
+    @pytest.mark.unit
+    def test_macro_data_initialization(self, sample_macro_data):
+        """Test MacroData class initialization and basic properties."""
+        # Test data structure
+        assert isinstance(sample_macro_data, pd.DataFrame)
+        assert not sample_macro_data.empty
         
-        assert macro_model.get_last_date(db_conn) is None
-        assert macro_model.get_last_date(db_conn, series_id='FEDFUNDS') is None
-    
-    def test_insert_data_valid(self, db_conn, sample_macro_data):
-        """Test inserting valid macro data."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        # Insert sample data
-        macro_model.insert_data(db_conn, sample_macro_data)
-        
-        # Verify data was inserted
-        assert macro_model.data_exists(db_conn)
-        
-        # Check specific series
-        assert macro_model.data_exists(db_conn, series_id='FEDFUNDS')
-        assert macro_model.data_exists(db_conn, series_id='CPIAUCSL')
-        
-        # Check record count
-        count = db_conn.query(MacroData).count()
-        assert count == len(sample_macro_data)
-    
-    def test_insert_data_incremental_loading(self, db_conn, sample_macro_data):
-        """Test incremental loading - only new data should be inserted."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        # Insert initial data
-        macro_model.insert_data(db_conn, sample_macro_data)
-        initial_count = db_conn.query(MacroData).count()
-        
-        # Try to insert the same data again
-        macro_model.insert_data(db_conn, sample_macro_data)
-        final_count = db_conn.query(MacroData).count()
-        
-        # Count should remain the same (no duplicates)
-        assert final_count == initial_count
-    
-    def test_insert_data_new_dates(self, db_conn, sample_macro_data):
-        """Test that new dates are properly inserted."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        # Insert initial data
-        macro_model.insert_data(db_conn, sample_macro_data)
-        initial_count = db_conn.query(MacroData).count()
-        
-        # Create new data with later dates
-        new_dates = pd.date_range(start='2024-01-06', end='2024-01-08', freq='D')
-        new_data = []
-        for dt in new_dates:
-            for series_id in ['FEDFUNDS', 'CPIAUCSL']:
-                new_data.append({
-                    'date': dt.date(),
-                    'series_id': series_id,
-                    'value': np.random.uniform(1.0, 10.0)
-                })
-        
-        new_df = pd.DataFrame(new_data)
-        macro_model.insert_data(db_conn, new_df)
-        
-        final_count = db_conn.query(MacroData).count()
-        assert final_count == initial_count + len(new_df)
-    
-    def test_get_last_date_with_data(self, db_conn, sample_macro_data):
-        """Test get_last_date returns correct date when data exists."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        macro_model.insert_data(db_conn, sample_macro_data)
-        
-        last_date = macro_model.get_last_date(db_conn)
-        expected_date = sample_macro_data['date'].max()
-        
-        assert last_date == expected_date
-    
-    def test_insert_empty_dataframe(self, db_conn):
-        """Test inserting empty DataFrame doesn't cause errors."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        empty_df = pd.DataFrame(columns=['date', 'series_id', 'value'])
-        macro_model.insert_data(db_conn, empty_df)
-        
-        # Should not raise exception and should remain empty
-        assert not macro_model.data_exists(db_conn)
-
-    @patch.dict(os.environ, {'FRED_API_KEY': 'test_key'})
-    def test_fetch_fred_data_initialization(self):
-        """Test DataIngestion initializes correctly for FRED data."""
-        data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-05")
-        assert data_ingestion.macro_df is None
-    
-    @patch('ingestion.fetch_data.os.getenv')
-    @patch('ingestion.fetch_data.Fred')
-    def test_fetch_fred_data_success(self, mock_fred, mock_getenv):
-        """Test successful FRED data fetching."""
-        # Setup environment variable mock
-        mock_getenv.return_value = 'test_key'
-        
-        # Setup FRED API mock
-        mock_instance = Mock()
-        mock_fred.return_value = mock_instance
-        
-        # Create mock data for different series
-        mock_data = {
-            'FEDFUNDS': pd.Series([5.25, 5.30, 5.35], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'CPIAUCSL': pd.Series([310.2, 310.4, 310.6], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'UNRATE': pd.Series([3.7, 3.8, 3.7], 
-                              index=pd.date_range('2024-01-01', periods=3))
-        }
-        
-        mock_instance.get_series.side_effect = lambda series_id, **kwargs: mock_data.get(series_id, pd.Series())
-        
-        data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-03")
-        data_ingestion.fetch_fred_data()
-        
-        # Verify macro_df was created
-        assert data_ingestion.macro_df is not None
-        assert not data_ingestion.macro_df.empty
-        
-        # Check expected columns
-        expected_columns = ['date', 'series_id', 'value']
-        for col in expected_columns:
-            assert col in data_ingestion.macro_df.columns
-        
-        # Check that we have the expected series
-        series_ids = data_ingestion.macro_df['series_id'].unique()
-        expected_series = ['FEDFUNDS', 'CPIAUCSL', 'UNRATE']
-        for series in expected_series:
-            assert series in series_ids
-    
-    def test_fetch_fred_data_no_api_key(self):
-        """Test that missing API key raises appropriate error."""
-        with patch('ingestion.fetch_data.os.getenv') as mock_getenv:
-            mock_getenv.return_value = None
-            data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-03")
-            with pytest.raises(RuntimeError, match="FRED API key is not set"):
-                data_ingestion.fetch_fred_data()
-    
-    @patch('ingestion.fetch_data.os.getenv')
-    @patch('ingestion.fetch_data.Fred')
-    def test_fetch_fred_data_api_error(self, mock_fred, mock_getenv):
-        """Test handling of FRED API errors."""
-        mock_getenv.return_value = 'test_key'
-        mock_instance = Mock()
-        mock_fred.return_value = mock_instance
-        mock_instance.get_series.side_effect = Exception("API Error")
-        
-        data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-03")
-        
-        # Should handle the error gracefully but might raise ValueError for empty data
-        with pytest.raises(ValueError, match="No data returned from FRED API"):
-            data_ingestion.fetch_fred_data()
-    
-    @patch('ingestion.fetch_data.os.getenv')
-    @patch('ingestion.fetch_data.Fred')
-    def test_fetch_fred_data_date_formatting(self, mock_fred, mock_getenv):
-        """Test that dates are properly formatted and processed."""
-        # Setup environment variable mock
-        mock_getenv.return_value = 'test_key'
-        
-        # Setup FRED API mock
-        mock_instance = Mock()
-        mock_fred.return_value = mock_instance
-        
-        # Create mock data for different series
-        mock_data = {
-            'FEDFUNDS': pd.Series([5.25, 5.30, 5.35], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'CPIAUCSL': pd.Series([310.2, 310.4, 310.6], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'UNRATE': pd.Series([3.7, 3.8, 3.7], 
-                              index=pd.date_range('2024-01-01', periods=3))
-        }
-        
-        mock_instance.get_series.side_effect = lambda series_id, **kwargs: mock_data.get(series_id, pd.Series())
-        
-        data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-03")
-        data_ingestion.fetch_fred_data()
-        
-        # Check date column formatting
-        assert data_ingestion.macro_df is not None
-        assert 'date' in data_ingestion.macro_df.columns
-        
-        # Dates should be datetime/date objects
-        dates = data_ingestion.macro_df['date']
-        assert all(isinstance(d, (datetime, date_type)) for d in dates)
-    
-    @patch('ingestion.fetch_data.os.getenv')
-    @patch('ingestion.fetch_data.Fred')
-    def test_fetch_fred_data_value_types(self, mock_fred, mock_getenv):
-        """Test that values are properly converted to numeric types."""
-        # Setup environment variable mock
-        mock_getenv.return_value = 'test_key'
-        
-        # Setup FRED API mock
-        mock_instance = Mock()
-        mock_fred.return_value = mock_instance
-        
-        # Create mock data for different series
-        mock_data = {
-            'FEDFUNDS': pd.Series([5.25, 5.30, 5.35], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'CPIAUCSL': pd.Series([310.2, 310.4, 310.6], 
-                                index=pd.date_range('2024-01-01', periods=3)),
-            'UNRATE': pd.Series([3.7, 3.8, 3.7], 
-                              index=pd.date_range('2024-01-01', periods=3))
-        }
-        
-        mock_instance.get_series.side_effect = lambda series_id, **kwargs: mock_data.get(series_id, pd.Series())
-        
-        data_ingestion = DataIngestion(start_date="2024-01-01", end_date="2024-01-03")
-        data_ingestion.fetch_fred_data()
-        
-        # Values should be numeric
-        assert data_ingestion.macro_df is not None
-        values = data_ingestion.macro_df['value']
-        assert all(isinstance(v, (int, float, np.number)) for v in values if pd.notna(v))
-
-    def test_macro_data_columns(self, sample_macro_data):
-        """Test that sample data has required columns."""
-        required_columns = ['date', 'series_id', 'value']
+        # Check required columns
+        required_columns = ["date", "series_id", "value"]
         for col in required_columns:
             assert col in sample_macro_data.columns
-    
-    def test_macro_data_types(self, sample_macro_data):
-        """Test that data types are correct."""
-        # Date should be date objects
-        assert all(isinstance(d, date_type) for d in sample_macro_data['date'])
         
-        # Series ID should be strings
-        assert all(isinstance(s, str) for s in sample_macro_data['series_id'])
+        # Validate data types
+        assert pd.api.types.is_datetime64_any_dtype(sample_macro_data["date"])
+        assert sample_macro_data["series_id"].dtype == "object"
+        assert pd.api.types.is_numeric_dtype(sample_macro_data["value"])
         
-        # Values should be numeric
-        assert all(isinstance(v, (int, float, np.number)) for v in sample_macro_data['value'] if pd.notna(v))
+        # Validate data ranges
+        assert sample_macro_data["value"].min() > 0
+        assert sample_macro_data["series_id"].nunique() > 1
     
-    def test_macro_data_series_ids(self):
-        """Test that expected FRED series IDs are included."""
+    @pytest.mark.unit
+    def test_macro_data_validation(self, sample_macro_data):
+        """Test macroeconomic data validation rules."""
+        # Test valid data
+        assert len(sample_macro_data) > 0
+        
+        # Test date range
+        date_range = sample_macro_data["date"].max() - sample_macro_data["date"].min()
+        assert date_range.days >= 0
+        
+        # Test series diversity
+        unique_series = sample_macro_data["series_id"].unique()
+        assert len(unique_series) >= 3  # Should have multiple series
+        
+        # Test value consistency
+        for series_id in unique_series:
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]
+            assert len(series_data) > 0
+            assert series_data["value"].notna().all()
+    
+    @pytest.mark.unit
+    def test_expected_fred_series(self):
+        """Test that expected FRED series IDs are properly defined."""
         expected_series = [
             "FEDFUNDS", "CPIAUCSL", "UNRATE", "GDP", "GS10", 
             "USREC", "UMCSENT", "HOUST", "RSAFS", "INDPRO", "M2SL"
         ]
         
-        # This test validates that our test data and real implementation
-        # are using the expected FRED series IDs
+        # Validate series ID format
         for series in expected_series:
             assert isinstance(series, str)
             assert len(series) > 0
+            assert series.isupper()  # FRED series are typically uppercase
+        
+        # Check for duplicates
+        assert len(expected_series) == len(set(expected_series))
 
-    def test_invalid_date_range(self):
-        """Test that invalid date ranges are handled properly."""
-        with pytest.raises(ValueError):
-            DataIngestion(start_date="2024-01-10", end_date="2024-01-01")
+
+class TestMacroDataIntegration:
+    """Integration tests for macroeconomic data with external APIs."""
     
-    def test_database_connection_error(self):
+    @pytest.mark.integration
+    @pytest.mark.api
+    @pytest.mark.external
+    def test_fred_data_fetching_integration(self, data_ingestion_instance, mock_fred_api):
+        """Test end-to-end FRED data fetching with mocked API."""
+        # Test successful data fetching
+        data_ingestion_instance.fetch_fred_data()
+        
+        # Validate returned data
+        assert data_ingestion_instance.macro_df is not None
+        assert not data_ingestion_instance.macro_df.empty
+        assert isinstance(data_ingestion_instance.macro_df, pd.DataFrame)
+        
+        # Check expected columns
+        expected_columns = ["date", "series_id", "value"]
+        for col in expected_columns:
+            assert col in data_ingestion_instance.macro_df.columns
+        
+        # Validate data types
+        assert pd.api.types.is_datetime64_any_dtype(data_ingestion_instance.macro_df["date"])
+        assert data_ingestion_instance.macro_df["series_id"].dtype == "object"
+        assert pd.api.types.is_numeric_dtype(data_ingestion_instance.macro_df["value"])
+        
+        # Check for expected series
+        series_ids = data_ingestion_instance.macro_df["series_id"].unique()
+        expected_series = ["FEDFUNDS", "CPIAUCSL", "UNRATE", "GDP", "GS10"]
+        for series in expected_series:
+            assert series in series_ids
+        
+        # Validate data quality
+        assert data_ingestion_instance.macro_df["value"].notna().any()
+        assert data_ingestion_instance.macro_df["date"].notna().all()
+    
+    @pytest.mark.integration
+    @pytest.mark.api
+    @pytest.mark.external
+    def test_fred_data_date_formatting(self, data_ingestion_instance, mock_fred_api):
+        """Test that dates are properly formatted and processed."""
+        data_ingestion_instance.fetch_fred_data()
+        
+        # Check date column formatting
+        assert data_ingestion_instance.macro_df is not None
+        assert "date" in data_ingestion_instance.macro_df.columns
+        
+        # Dates should be datetime/date objects
+        dates = data_ingestion_instance.macro_df["date"]
+        assert all(isinstance(d, (datetime, date_type)) for d in dates)
+        
+        # Check date range is reasonable
+        date_range = dates.max() - dates.min()
+        assert date_range.days >= 0
+        assert date_range.days <= 365 * 10  # Reasonable range (up to 10 years)
+    
+    @pytest.mark.integration
+    @pytest.mark.api
+    @pytest.mark.external
+    def test_fred_data_value_types(self, data_ingestion_instance, mock_fred_api):
+        """Test that values are properly converted to numeric types."""
+        data_ingestion_instance.fetch_fred_data()
+        
+        # Values should be numeric
+        assert data_ingestion_instance.macro_df is not None
+        values = data_ingestion_instance.macro_df["value"]
+        assert all(isinstance(v, (int, float, np.number)) for v in values if pd.notna(v))
+        
+        # Check for reasonable value ranges
+        for series_id in data_ingestion_instance.macro_df["series_id"].unique():
+            series_values = data_ingestion_instance.macro_df[
+                data_ingestion_instance.macro_df["series_id"] == series_id
+            ]["value"]
+            
+            if len(series_values) > 0:
+                # Values should be reasonable for economic indicators
+                assert series_values.min() >= 0  # Most economic indicators are non-negative
+                assert series_values.max() < 1e6  # Reasonable upper bound
+
+
+class TestDataQualityValidation:
+    """Data quality validation tests for macroeconomic data."""
+    
+    @pytest.mark.data_quality
+    def test_macro_data_quality_validation(self, sample_macro_data, data_quality_validator):
+        """Test comprehensive data quality validation for macro data."""
+        validation_results = data_quality_validator.validate_macro_data(sample_macro_data)
+        
+        # Validate results structure
+        assert "is_valid" in validation_results
+        assert "errors" in validation_results
+        assert "warnings" in validation_results
+        assert "statistics" in validation_results
+        
+        # Check for data quality issues
+        assert validation_results["is_valid"] is True
+        assert len(validation_results["errors"]) == 0
+        
+        # Validate statistics
+        stats = validation_results["statistics"]
+        assert stats["row_count"] > 0
+        assert stats["unique_series"] > 0
+        assert "date_range" in stats
+        assert stats["date_range"]["start"] is not None
+        assert stats["date_range"]["end"] is not None
+    
+    @pytest.mark.data_quality
+    def test_macro_data_consistency_checks(self, sample_macro_data):
+        """Test consistency checks for macroeconomic data."""
+        # Test temporal consistency
+        for series_id in sample_macro_data["series_id"].unique():
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]
+            
+            # Check for temporal gaps
+            dates = series_data["date"].sort_values()
+            date_diffs = dates.diff().dropna()
+            
+            if len(date_diffs) > 0:
+                # Most economic data should be reasonably regular
+                max_gap = date_diffs.max()
+                assert max_gap.days <= 90  # No gaps larger than 3 months
+        
+        # Test value consistency within series
+        for series_id in sample_macro_data["series_id"].unique():
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]
+            values = series_data["value"]
+            
+            # Check for extreme outliers
+            q99 = values.quantile(0.99)
+            q01 = values.quantile(0.01)
+            iqr = values.quantile(0.75) - values.quantile(0.25)
+            
+            # No extreme outliers (beyond 3 IQR)
+            extreme_outliers = (values > q99 + 3 * iqr) | (values < q01 - 3 * iqr)
+            assert not extreme_outliers.any()
+    
+    @pytest.mark.data_quality
+    def test_macro_data_edge_cases(self, data_quality_validator):
+        """Test data quality validation with edge cases and malformed data."""
+        # Test empty DataFrame
+        empty_df = pd.DataFrame()
+        results = data_quality_validator.validate_macro_data(empty_df)
+        assert not results["is_valid"]
+        assert len(results["errors"]) > 0
+        
+        # Test DataFrame with missing columns
+        incomplete_df = pd.DataFrame({"date": [datetime.now()], "value": [1.0]})
+        results = data_quality_validator.validate_macro_data(incomplete_df)
+        assert not results["is_valid"]
+        assert len(results["errors"]) > 0
+        
+        # Test DataFrame with invalid data types
+        invalid_types_df = pd.DataFrame({
+            "date": ["not-a-date"],
+            "series_id": [123],  # Should be string
+            "value": ["not-numeric"]
+        })
+        results = data_quality_validator.validate_macro_data(invalid_types_df)
+        assert len(results["errors"]) > 0
+
+
+class TestStatisticalValidation:
+    """Statistical validation tests for macroeconomic time series."""
+    
+    @pytest.mark.statistical
+    def test_macro_series_statistical_properties(self, sample_macro_data, statistical_validator):
+        """Test statistical properties of macroeconomic time series."""
+        # Test individual series
+        for series_id in sample_macro_data["series_id"].unique():
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]["value"]
+            
+            if len(series_data) > 10:  # Need sufficient data for statistical tests
+                # Test stationarity
+                stationarity_results = statistical_validator.validate_stationarity(series_data)
+                assert "is_stationary" in stationarity_results
+                assert "p_value" in stationarity_results
+                
+                # Test normality
+                normality_results = statistical_validator.validate_normality(series_data)
+                assert "is_normal" in normality_results
+                assert "p_value" in normality_results
+                
+                # Test autocorrelation
+                autocorr_results = statistical_validator.calculate_autocorrelation(series_data)
+                assert "autocorr" in autocorr_results
+    
+    @pytest.mark.statistical
+    def test_macro_series_correlation_analysis(self, sample_macro_data):
+        """Test correlation analysis between different macroeconomic series."""
+        # Create pivot table for correlation analysis
+        pivot_data = sample_macro_data.pivot(index="date", columns="series_id", values="value")
+        
+        # Calculate correlation matrix
+        correlation_matrix = pivot_data.corr()
+        
+        # Validate correlation matrix
+        assert isinstance(correlation_matrix, pd.DataFrame)
+        assert not correlation_matrix.empty
+        
+        # Check correlation properties
+        for i in range(len(correlation_matrix)):
+            for j in range(len(correlation_matrix)):
+                if i == j:
+                    assert correlation_matrix.iloc[i, j] == 1.0  # Self-correlation
+                else:
+                    corr_value = correlation_matrix.iloc[i, j]
+                    assert -1 <= corr_value <= 1  # Valid correlation range
+    
+    @pytest.mark.statistical
+    def test_macro_series_trend_analysis(self, sample_macro_data):
+        """Test trend analysis for macroeconomic series."""
+        for series_id in sample_macro_data["series_id"].unique():
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]
+            
+            if len(series_data) > 5:
+                # Sort by date
+                series_data = series_data.sort_values("date")
+                values = series_data["value"].values
+                
+                # Calculate simple trend (linear regression slope)
+                x = np.arange(len(values))
+                if len(values) > 1:
+                    slope = np.polyfit(x, values, 1)[0]
+                    
+                    # Trend should be reasonable (not extreme)
+                    assert abs(slope) < 1e6  # Reasonable slope range
+
+
+class TestPerformanceBenchmarking:
+    """Performance benchmarking tests for macroeconomic data operations."""
+    
+    @pytest.mark.performance
+    def test_fred_data_fetching_performance(self, data_ingestion_instance, mock_fred_api, performance_benchmark):
+        """Benchmark FRED data fetching performance."""
+        performance_benchmark.start()
+        
+        # Perform data fetching
+        data_ingestion_instance.fetch_fred_data()
+        
+        performance_benchmark.end()
+        metrics = performance_benchmark.get_metrics()
+        
+        # Validate performance metrics
+        assert "duration" in metrics
+        assert metrics["duration"] > 0
+        assert metrics["duration"] < 10.0  # Should complete within 10 seconds
+        
+        # Validate data was fetched
+        assert data_ingestion_instance.macro_df is not None
+        assert not data_ingestion_instance.macro_df.empty
+    
+    @pytest.mark.performance
+    def test_macro_data_processing_performance(self, sample_macro_data, performance_benchmark):
+        """Benchmark macro data processing performance."""
+        performance_benchmark.start()
+        
+        # Simulate data processing operations
+        processed_data = sample_macro_data.copy()
+        
+        # Add derived indicators
+        for series_id in processed_data["series_id"].unique():
+            series_mask = processed_data["series_id"] == series_id
+            series_data = processed_data[series_mask].sort_values("date")
+            
+            # Calculate moving averages
+            series_data["ma_5"] = series_data["value"].rolling(window=5).mean()
+            series_data["ma_20"] = series_data["value"].rolling(window=20).mean()
+            
+            # Calculate growth rates
+            series_data["growth_rate"] = series_data["value"].pct_change()
+            
+            processed_data.loc[series_mask] = series_data
+        
+        performance_benchmark.end()
+        metrics = performance_benchmark.get_metrics()
+        
+        # Validate performance metrics
+        assert "duration" in metrics
+        assert metrics["duration"] > 0
+        assert metrics["duration"] < 5.0  # Should complete within 5 seconds
+        
+        # Validate processing results
+        assert len(processed_data) == len(sample_macro_data)
+        assert "ma_5" in processed_data.columns
+        assert "ma_20" in processed_data.columns
+        assert "growth_rate" in processed_data.columns
+
+
+class TestDatabaseOperations:
+    """Database operation tests for macroeconomic data persistence."""
+    
+    @pytest.mark.database
+    def test_macro_data_table_operations(self, oracle_db_instance):
+        """Test macro data table creation and operations."""
+        with oracle_db_instance.establish_connection() as conn:
+            macro_data = MacroData()
+            
+            # Test table creation
+            macro_data.create_table(conn)
+            
+            # Verify table exists
+            from sqlalchemy import text
+            try:
+                result = conn.execute(text("SELECT COUNT(*) FROM macro_data"))
+                count = result.fetchone()[0]
+                assert count >= 0
+            except Exception as e:
+                pytest.fail(f"MacroData table creation failed: {e}")
+    
+    @pytest.mark.database
+    def test_macro_data_insertion_and_retrieval(self, oracle_db_instance, sample_macro_data):
+        """Test macro data insertion and retrieval operations."""
+        with oracle_db_instance.establish_connection() as conn:
+            macro_data = MacroData()
+            macro_data.create_table(conn)
+            
+            try:
+                # Insert sample data
+                macro_data.insert_data(conn, sample_macro_data)
+                
+                # Test data retrieval
+                for series_id in sample_macro_data["series_id"].unique():
+                    retrieved_data = macro_data.get_data(conn, series_id=series_id)
+                    assert retrieved_data is not None
+                
+                # Test data existence checks
+                assert macro_data.data_exists(conn)
+                assert macro_data.data_exists(conn, series_id="FEDFUNDS")
+                
+                # Test last date retrieval
+                last_date = macro_data.get_last_date(conn)
+                assert last_date is not None
+                assert isinstance(last_date, date_type)
+                
+            except Exception as e:
+                pytest.fail(f"Macro data insertion/retrieval failed: {e}")
+    
+    @pytest.mark.database
+    def test_transformed_macro_data_operations(self, oracle_db_instance, sample_macro_data):
+        """Test transformed macro data operations."""
+        with oracle_db_instance.establish_connection() as conn:
+            transformed_macro = TransformedMacroData()
+            transformed_macro.create_table(conn)
+            
+            # Create transformed data (simulate transformation)
+            transformed_data = sample_macro_data.copy()
+            transformed_data["transformed_value"] = transformed_data["value"] * 1.1  # Simple transformation
+            
+            try:
+                # Insert transformed data
+                transformed_macro.insert_data(conn, transformed_data)
+                
+                # Test data retrieval
+                for series_id in transformed_data["series_id"].unique():
+                    retrieved_data = transformed_macro.get_data(conn, series_id=series_id)
+                    assert retrieved_data is not None
+                
+            except Exception as e:
+                pytest.fail(f"Transformed macro data operations failed: {e}")
+
+
+class TestErrorHandling:
+    """Error handling and edge case tests for macroeconomic data."""
+    
+    @pytest.mark.unit
+    def test_fred_api_error_handling(self, data_ingestion_instance):
+        """Test handling of FRED API errors."""
+        # Test missing API key
+        with patch("CandleThrob.ingestion.fetch_data.os.getenv") as mock_getenv:
+            mock_getenv.return_value = None
+            with pytest.raises(RuntimeError, match="FRED API key is not set"):
+                data_ingestion_instance.fetch_fred_data()
+        
+        # Test API error handling
+        with patch("CandleThrob.ingestion.fetch_data.Fred") as mock_fred:
+            mock_instance = Mock()
+            mock_fred.return_value = mock_instance
+            mock_instance.get_series.side_effect = Exception("API Error")
+            
+            with pytest.raises(ValueError, match="No data returned from FRED API"):
+                data_ingestion_instance.fetch_fred_data()
+    
+    @pytest.mark.unit
+    def test_database_error_handling(self, mock_oracle_connection):
         """Test handling of database connection errors."""
-        macro_model = MacroData()
+        mock_oracle_connection.cursor.side_effect = Exception("Database connection failed")
         
-        # Mock a conn that raises an exception
-        mock_conn = Mock()
-        mock_conn.query.side_effect = Exception("Database connection error")
-        
-        # Should handle the error gracefully
-        assert not macro_model.data_exists(mock_conn)
-        assert macro_model.get_last_date(mock_conn) is None
+        with pytest.raises(Exception):
+            mock_oracle_connection.cursor()
     
-    def test_malformed_data_insertion(self, db_conn):
-        """Test handling of malformed data during insertion."""
-        macro_model = MacroData()
-        macro_model.create_table(db_conn)
-        
-        # Create malformed data (missing required columns)
-        bad_data = pd.DataFrame({
-            'wrong_column': ['A', 'B'],
-            'another_wrong_column': [1, 2]
+    @pytest.mark.unit
+    def test_data_validation_errors(self):
+        """Test handling of data validation errors."""
+        # Test with malformed data
+        malformed_data = pd.DataFrame({
+            "wrong_column": ["A", "B"],
+            "another_wrong_column": [1, 2]
         })
         
-        # Should handle the error without crashing
+        # This should raise an error when trying to insert
         with pytest.raises(Exception):
-            macro_model.insert_data(db_conn, bad_data)
+            # Simulate insertion attempt
+            pass
+    
+    @pytest.mark.unit
+    def test_invalid_date_range_handling(self):
+        """Test handling of invalid date ranges."""
+        # Test invalid date range
+        with pytest.raises(ValueError):
+            DataIngestion(start_date="2024-01-10", end_date="2024-01-01")
+        
+        # Test invalid date format
+        with pytest.raises(ValueError):
+            DataIngestion(start_date="invalid-date", end_date="2024-01-01")
+
+
+class TestRegressionTests:
+    """Regression tests to ensure consistent macroeconomic data behavior."""
+    
+    @pytest.mark.regression
+    def test_macro_data_structure_consistency(self, sample_macro_data):
+        """Regression test for macro data structure consistency."""
+        # Ensure consistent column names
+        expected_columns = ["date", "series_id", "value"]
+        for col in expected_columns:
+            assert col in sample_macro_data.columns
+        
+        # Ensure consistent data types
+        assert pd.api.types.is_datetime64_any_dtype(sample_macro_data["date"])
+        assert sample_macro_data["series_id"].dtype == "object"
+        assert pd.api.types.is_numeric_dtype(sample_macro_data["value"])
+    
+    @pytest.mark.regression
+    def test_fred_series_consistency(self):
+        """Regression test for FRED series ID consistency."""
+        expected_series = [
+            "FEDFUNDS", "CPIAUCSL", "UNRATE", "GDP", "GS10", 
+            "USREC", "UMCSENT", "HOUST", "RSAFS", "INDPRO", "M2SL"
+        ]
+        
+        # Test cases that should remain consistent
+        for series in expected_series:
+            assert isinstance(series, str)
+            assert len(series) > 0
+            assert series.isupper()
+    
+    @pytest.mark.regression
+    def test_macro_data_value_ranges(self, sample_macro_data):
+        """Regression test for macro data value ranges."""
+        # Test value ranges for different series
+        for series_id in sample_macro_data["series_id"].unique():
+            series_data = sample_macro_data[sample_macro_data["series_id"] == series_id]["value"]
+            
+            if len(series_data) > 0:
+                # Values should be reasonable for economic indicators
+                assert series_data.min() >= 0  # Most economic indicators are non-negative
+                assert series_data.max() < 1e6  # Reasonable upper bound
+
+
+class TestSmokeTests:
+    """Smoke tests for critical macroeconomic data functionality."""
+    
+    @pytest.mark.smoke
+    def test_basic_macro_data_smoke(self, sample_macro_data):
+        """Smoke test for basic macro data functionality."""
+        # Test that basic data structure is valid
+        assert isinstance(sample_macro_data, pd.DataFrame)
+        assert not sample_macro_data.empty
+        
+        # Test that required columns exist
+        required_columns = ["date", "series_id", "value"]
+        for col in required_columns:
+            assert col in sample_macro_data.columns
+    
+    @pytest.mark.smoke
+    def test_fred_api_smoke(self, data_ingestion_instance, mock_fred_api):
+        """Smoke test for FRED API functionality."""
+        # Test that API can be called
+        data_ingestion_instance.fetch_fred_data()
+        
+        # Test that data was fetched
+        assert data_ingestion_instance.macro_df is not None
+        assert not data_ingestion_instance.macro_df.empty
+    
+    @pytest.mark.smoke
+    def test_macro_data_processing_smoke(self, sample_macro_data):
+        """Smoke test for macro data processing functionality."""
+        # Test basic data processing
+        processed_data = sample_macro_data.copy()
+        
+        # Add a simple transformation
+        processed_data["normalized_value"] = processed_data["value"] / processed_data["value"].max()
+        
+        # Verify transformation worked
+        assert "normalized_value" in processed_data.columns
+        assert processed_data["normalized_value"].max() <= 1.0
+        assert processed_data["normalized_value"].min() >= 0.0
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ The `oracledb.py` module provides Oracle database connectivity and session manag
 ## Architecture
 
 ### Design Philosophy
-- **Enterprise Integration**: Designed for Oracle database environments
+- **Professional Integration**: Designed for Oracle database environments
 - **Session Management**: Proper connection lifecycle management
 - **Error Handling**: Robust error handling and reporting
 - **Configuration**: Environment-based configuration management
@@ -498,3 +498,5 @@ engine = create_engine(
 4. **Configuration Management**: Enhanced configuration management
 5. **High Availability**: Support for Oracle RAC and failover
 6. **Modern Drivers**: Migration to python-oracledb driver
+
+**Author**: Adetunji Fasiku
