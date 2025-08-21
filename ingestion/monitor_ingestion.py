@@ -14,7 +14,7 @@ Key Features:
 - Data quality validation and alerting
 - Security best practices
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 2.0.0
 """
 
@@ -35,7 +35,7 @@ import traceback
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CandleThrob.utils.models import TickerData, MacroData
 from CandleThrob.utils.oracle_conn import OracleDB
-from CandleThrob.utils.logging_config import get_ingestion_logger, log_ingestion_error
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Centralized, structured logger
 logger = get_ingestion_logger("monitor_ingestion")

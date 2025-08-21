@@ -1,548 +1,306 @@
-#!/usr/bin/env python3
 """
-Transform Data Script for CandleThrob
-=====================================
+Transform Orchestrator for CandleThrob
+======================================
 
-This script processes raw OHLCV data and adds technical indicators using TA-Lib.
-It's designed to run as the transformation step after data ingestion is complete.
-
-Features:
-- Comprehensive error handling and validation
-- Performance monitoring and logging
-- Type safety with full type hints
-- Data quality checks and validation
-- Modular design for maintainability
-- Comprehensive documentation
-
-Author: Adetunji Fasiku
-Version: 1.0.0
+This module provides the main orchestration logic for data transformation,
+replacing the monolithic transform_data.py with a more modular approach.
 """
 
-import sys
-import os
-import re
-import pandas as pd
-import logging
-import time
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Union
-from dataclasses import dataclass
+import json
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 from pathlib import Path
-import traceback
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from CandleThrob.transform.enrich_data import TechnicalIndicators, EnrichMacros
-from CandleThrob.utils.oracle_conn import OracleDB
-from CandleThrob.utils.models import TickerData, TransformedTickerData, MacroData, TransformedMacroData
-
-# Import centralized logging configuration
-from CandleThrob.utils.logging_config import get_ingestion_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error
-
-# Get logger for this module
-logger = get_ingestion_logger("transform_data")
+from ..core.config import get_config, CandleThrobConfig
+from ..core.logging import get_transform_logger, CandleThrobLogger
+from .processors import BatchTransformProcessor, TransformResult
 
 
-@dataclass
-class TransformConfig:
-    """Configuration class for data transformation settings."""
+class TransformOrchestrator:
+    """Main orchestrator for data transformation operations."""
     
-    batch_size: int = 1000
-    timeout_seconds: int = 3600
-    max_retries: int = 3
-    validation_enabled: bool = True
-    performance_monitoring: bool = True
-    data_quality_checks: bool = True
-    
-    def __post_init__(self):
-        """Validate configuration parameters."""
-        if self.batch_size <= 0:
-            raise ValueError("batch_size must be positive")
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
-
-
-class DataValidator:
-    """Data validation utilities for transformation pipeline."""
-    
-    @staticmethod
-    def validate_ticker_data(df: pd.DataFrame) -> bool:
-        """
-        Validate ticker data for required columns and data quality.
+    def __init__(self, config: Optional[CandleThrobConfig] = None):
+        """Initialize the transform orchestrator."""
+        self.config = config or get_config()
+        self.logger = get_transform_logger("orchestrator")
+        self.batch_processor = BatchTransformProcessor(
+            self.config.processing,
+            self.config.quality
+        )
         
-        Args:
-            df: DataFrame containing ticker data
+        # Initialize logging system
+        CandleThrobLogger.initialize(self.config.logging)
+        
+        self.logger.logger.info("TransformOrchestrator initialized")
+    
+    def run_complete_transformation(self) -> Dict[str, Any]:
+        """Run complete data transformation for all available tickers."""
+        self.logger.logger.info("Starting complete data transformation")
+        
+        # Get all available tickers from GCS
+        available_tickers = self._get_available_tickers()
+        
+        if not available_tickers:
+            error_msg = "No tickers available for transformation"
+            self.logger.logger.error(error_msg)
+            return {"error": error_msg}
+        
+        self.logger.logger.info(f"Found {len(available_tickers)} tickers for transformation")
+        
+        # Calculate batches
+        batch_size = self.config.processing.batch_size
+        total_batches = (len(available_tickers) + batch_size - 1) // batch_size
+        
+        self.logger.logger.info(f"Processing {total_batches} batches of {batch_size} tickers each")
+        
+        # Process all batches
+        overall_results = self._process_all_batches(available_tickers, batch_size, total_batches)
+        
+        # Transform macro data
+        macro_results = self._transform_macro_data()
+        overall_results["macro_results"] = macro_results
+        
+        # Save results and signal completion
+        self._finalize_transformation(overall_results)
+        
+        return overall_results
+    
+    def _get_available_tickers(self) -> List[str]:
+        """Get list of available tickers from GCS."""
+        try:
+            from ..utils.gcs import list_available_tickers
+            tickers = list_available_tickers(bucket_name=self.config.storage.gcs_bucket)
+            self.logger.logger.info(f"Found {len(tickers)} available tickers in GCS")
+            return tickers
+        except Exception as e:
+            self.logger.logger.error(f"Failed to get available tickers: {e}")
+            return []
+    
+    def _process_all_batches(self, tickers: List[str], batch_size: int, total_batches: int) -> Dict[str, Any]:
+        """Process all batches of tickers."""
+        start_time = datetime.now()
+        overall_results = {
+            "total_batches": total_batches,
+            "total_tickers": len(tickers),
+            "successful_tickers": 0,
+            "failed_tickers": 0,
+            "failed_tickers_list": [],
+            "batch_results": [],
+            "start_time": start_time.isoformat(),
+            "end_time": None
+        }
+        
+        for batch_num in range(total_batches):
+            start_idx = batch_num * batch_size
+            end_idx = min((batch_num + 1) * batch_size, len(tickers))
             
-        Returns:
-            bool: True if validation passes
+            batch_tickers = tickers[start_idx:end_idx]
+            self.logger.logger.info(f"Processing batch {batch_num + 1}/{total_batches}: tickers {start_idx}-{end_idx-1} ({len(batch_tickers)} tickers)")
+            self.logger.logger.info(f"Batch tickers: {batch_tickers}")
             
-        Raises:
-            ValueError: If validation fails
-        """
-        if df is None or df.empty:
-            raise ValueError("DataFrame is None or empty")
-        
-        required_columns = ['ticker', 'trade_date', 'open', 'high', 'low', 'close', 'volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            raise ValueError(f"Missing required columns: {missing_columns}")
-        
-        # Check for null values in critical columns
-        critical_columns = ['ticker', 'trade_date', 'close']
-        for col in critical_columns:
-            if df[col].isnull().any():
-                logger.warning(f"Found null values in critical column: {col}")
-        
-        # Validate date range
-        if 'trade_date' in df.columns:
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            min_date = df['trade_date'].min()
-            max_date = df['trade_date'].max()
+            # Process batch
+            batch_results = self.batch_processor.process_tickers(batch_tickers)
             
-            if min_date < pd.Timestamp('1990-01-01'):
-                logger.warning(f"Data contains dates before 1990: {min_date}")
+            # Update overall results
+            overall_results["successful_tickers"] += batch_results["successful"]
+            overall_results["failed_tickers"] += batch_results["failed"]
+            overall_results["failed_tickers_list"].extend(batch_results["failed_tickers"])
+            overall_results["batch_results"].append({
+                "batch_number": batch_num,
+                "results": batch_results
+            })
             
-            if max_date > datetime.now():
-                logger.warning(f"Data contains future dates: {max_date}")
+            self.logger.logger.info(f"Batch {batch_num + 1} completed: {batch_results['successful']} successful, {batch_results['failed']} failed")
+            self.logger.logger.info(f"Running total: {overall_results['successful_tickers']} successful, {overall_results['failed_tickers']} failed")
         
-        # Validate price data
-        if all(col in df.columns for col in ['open', 'high', 'low', 'close']):
-            price_validation = (
-                (df['high'] >= df['low']).all() and
-                (df['high'] >= df['open']).all() and
-                (df['high'] >= df['close']).all() and
-                (df['low'] <= df['open']).all() and
-                (df['low'] <= df['close']).all()
-            )
-            
-            if not price_validation:
-                raise ValueError("Price data validation failed: OHLC relationships are invalid")
+        end_time = datetime.now()
+        overall_results["end_time"] = end_time.isoformat()
+        overall_results["duration_seconds"] = (end_time - start_time).total_seconds()
         
-        # Validate volume data
-        if 'volume' in df.columns:
-            if (df['volume'] < 0).any():
-                raise ValueError("Volume data contains negative values")
-        
-        logger.info("Data validation completed successfully")
-        return True
+        return overall_results
     
-    @staticmethod
-    def validate_macro_data(df: pd.DataFrame) -> bool:
-        """
-        Validate macroeconomic data for required columns and data quality.
-        
-        Args:
-            df: DataFrame containing macro data
-            
-        Returns:
-            bool: True if validation passes
-            
-        Raises:
-            ValueError: If validation fails
-        """
-        if df is None or df.empty:
-            raise ValueError("Macro DataFrame is None or empty")
-        
-        required_columns = ['series_id', 'date', 'value']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            raise ValueError(f"Missing required columns: {missing_columns}")
-        
-        # Check for null values in critical columns
-        critical_columns = ['series_id', 'date']
-        for col in critical_columns:
-            if df[col].isnull().any():
-                logger.warning(f"Found null values in critical column: {col}")
-        
-        # Validate date range
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'])
-            min_date = df['date'].min()
-            max_date = df['date'].max()
-            
-            if min_date < pd.Timestamp('1950-01-01'):
-                logger.warning(f"Macro data contains dates before 1950: {min_date}")
-            
-            if max_date > datetime.now():
-                logger.warning(f"Macro data contains future dates: {max_date}")
-        
-        logger.info("Macro data validation completed successfully")
-        return True
-
-
-class PerformanceMonitor:
-    """Performance monitoring utilities for transformation pipeline."""
-    
-    def __init__(self):
-        self.start_time = None
-        self.metrics = {}
-    
-    def start_timer(self, operation: str):
-        """Start timing an operation."""
-        self.start_time = time.time()
-        logger.info(f"Starting operation: {operation}")
-    
-    def end_timer(self, operation: str) -> float:
-        """End timing an operation and return duration."""
-        if self.start_time is None:
-            logger.warning("Timer was not started")
-            return 0.0
-        
-        duration = time.time() - self.start_time
-        self.metrics[operation] = duration
-        # log_performance_metrics(logger, operation, duration) # This line was removed as per the edit hint
-        return duration
-    
-    def get_metrics(self) -> Dict[str, float]:
-        """Get all performance metrics."""
-        return self.metrics.copy()
-
-
-class CompleteDataTransform:
-    """
-    Comprehensive data transformation pipeline for CandleThrob.
-    
-    This class handles the transformation of both ticker and macroeconomic data,
-    including technical indicator calculation, data validation, and performance monitoring.
-    
-    Attributes:
-        config: TransformConfig instance with transformation settings
-        db: OracleDB instance for database operations
-        engine: SQLAlchemy engine for database operations
-        validator: DataValidator instance for data validation
-        monitor: PerformanceMonitor instance for performance tracking
-    """
-    
-    def __init__(self, config: Optional[TransformConfig] = None):
-        """
-        Initialize the CompleteDataTransform class.
-        
-        Args:
-            config: Optional configuration object. If None, uses default settings.
-        """
-        self.config = config or TransformConfig()
-        self.db = OracleDB()
-        self.engine = self.db.get_sqlalchemy_engine()
-        self.validator = DataValidator()
-        self.monitor = PerformanceMonitor()
-        
-        logger.info("CompleteDataTransform initialized with configuration: %s", self.config)
-    
-    def transform_tickers(self, ticker: str) -> bool:
-        """
-        Transform data for a specific ticker.
-        
-        Args:
-            ticker: Ticker symbol to transform
-            
-        Returns:
-            bool: True if transformation was successful
-            
-        Raises:
-            ValueError: If data validation fails
-            Exception: If transformation fails
-        """
-        self.monitor.start_timer(f"transform_ticker_{ticker}")
+    def _transform_macro_data(self) -> Dict[str, Any]:
+        """Transform macro economic data."""
+        self.logger.logger.info("Starting macro data transformation")
         
         try:
-            logger.info(f"Starting transformation for ticker: {ticker}")
+            from ..utils.gcs import list_available_macro_series
+            available_series = list_available_macro_series(bucket_name=self.config.storage.gcs_bucket)
             
-            with self.db.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Fetch ticker data
-                    ticker_model = TickerData()
-                    ticker_data = ticker_model.get_data(cursor, ticker=ticker)
-                    
-                    if not ticker_data:
-                        logger.error(f"No data found for ticker: {ticker}")
-                        return False
-                    
-                    ticker_df = pd.DataFrame(ticker_data)
-                    
-                    # Validate data
-                    if self.config.validation_enabled:
-                        self.validator.validate_ticker_data(ticker_df)
-                    
-                    # Create transformed table
-                    transformed_ticker_model = TransformedTickerData()
-                    transformed_ticker_model.create_table(cursor)
-                    
-                    # Transform data
-                    ticker_df["trade_date"] = pd.to_datetime(ticker_df["trade_date"])
-                    
-                    # Calculate technical indicators
-                    transformed_ticker_data = TechnicalIndicators(ticker_df)
-                    transformed_ticker_data.enrich_tickers()
-                    enriched_df = transformed_ticker_data.transform()
-
-                    # Insert transformed data
-                    if enriched_df is not None and not enriched_df.empty:
-                        transformed_ticker_model.insert_data(
-                            self.engine,
-                            enriched_df
-                        )
-                        logger.info(f"Transformed data for ticker: {ticker} inserted into database")
+            if not available_series:
+                self.logger.logger.warning("No macro data series available for transformation")
+                return {"total_series": 0, "successful": 0, "failed": 0}
+            
+            self.logger.logger.info(f"Found {len(available_series)} macro data series for transformation")
+            
+            results = {"total_series": len(available_series), "successful": 0, "failed": 0, "failed_series": []}
+            
+            for series_id in available_series:
+                try:
+                    result = self.batch_processor.macro_processor.process(series_id)
+                    if result.success:
+                        results["successful"] += 1
                     else:
-                        logger.warning(f"No transformed data generated for ticker: {ticker}")
-                        return False
+                        results["failed"] += 1
+                        results["failed_series"].append(series_id)
+                except Exception as e:
+                    self.logger.logger.error(f"Error transforming macro series {series_id}: {e}")
+                    results["failed"] += 1
+                    results["failed_series"].append(series_id)
             
-            self.monitor.end_timer(f"transform_ticker_{ticker}")
-            return True
+            self.logger.logger.info(f"Macro transformation completed: {results['successful']} successful, {results['failed']} failed")
+            return results
             
         except Exception as e:
-            # log_error_with_context(logger, e, f"transform_ticker_{ticker}", {"ticker": ticker}) # This line was removed as per the edit hint
-            logger.error(f"Error transforming ticker {ticker}: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
+            self.logger.logger.error(f"Failed to transform macro data: {e}")
+            return {"error": str(e)}
     
-    def transform_macro_data(self, series_id: str) -> bool:
-        """
-        Transform macroeconomic data for a specific series.
+    def _finalize_transformation(self, results: Dict[str, Any]) -> None:
+        """Finalize transformation process and save results."""
+        # Log final results
+        self.logger.logger.info("Complete transformation finished!")
+        self.logger.logger.info(f"Total batches processed: {results['total_batches']}")
+        self.logger.logger.info(f"Total tickers processed: {results['total_tickers']}")
+        self.logger.logger.info(f"Successful: {results['successful_tickers']}")
+        self.logger.logger.info(f"Failed: {results['failed_tickers']}")
+        self.logger.logger.info(f"Total duration: {results['duration_seconds']:.2f} seconds")
         
-        Args:
-            series_id: Series ID to transform
-            
-        Returns:
-            bool: True if transformation was successful
-            
-        Raises:
-            ValueError: If data validation fails
-            Exception: If transformation fails
-        """
-        self.monitor.start_timer(f"transform_macro_{series_id}")
+        if results['failed_tickers'] > 0:
+            self.logger.logger.warning(f"Failed tickers: {results['failed_tickers_list']}")
+        
+        # Log macro results
+        macro_results = results.get("macro_results", {})
+        if "error" not in macro_results:
+            self.logger.logger.info(f"Macro data: {macro_results.get('successful', 0)} successful, {macro_results.get('failed', 0)} failed")
+        
+        # Create data directory and save results
+        data_dir = Path(self.config.storage.local_data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Signal completion
+        try:
+            completion_flag = data_dir / "transform_cycle_complete.flag"
+            with open(completion_flag, "w") as f:
+                f.write(datetime.now().isoformat())
+            self.logger.logger.info(f"Transform cycle complete flag written to: {completion_flag}")
+        except Exception as e:
+            self.logger.logger.error(f"Failed to write transform cycle complete flag: {e}")
+        
+        # Save comprehensive results
+        results_file = data_dir / "transform_results.json"
+        try:
+            with open(results_file, 'w') as f:
+                json.dump(results, f, indent=2, default=str)
+            self.logger.logger.info(f"Results saved to {results_file}")
+        except Exception as e:
+            self.logger.logger.error(f"Failed to save results: {e}")
+    
+    def run_single_ticker(self, ticker: str) -> TransformResult:
+        """Run transformation for a single ticker."""
+        self.logger.logger.info(f"Starting single ticker transformation for {ticker}")
+        
+        # Use ticker processor directly
+        result = self.batch_processor.ticker_processor.process(ticker)
+        
+        self.logger.logger.info(f"Single ticker transformation completed for {ticker}: {'success' if result.success else 'failed'}")
+        return result
+    
+    def run_batch(self, tickers: List[str]) -> Dict[str, Any]:
+        """Run transformation for a specific batch of tickers."""
+        self.logger.logger.info(f"Starting batch transformation for {len(tickers)} tickers")
+        
+        results = self.batch_processor.process_tickers(tickers)
+        
+        self.logger.logger.info(f"Batch transformation completed: {results['successful']} successful, {results['failed']} failed")
+        return results
+    
+    def run_ticker_validation(self) -> Dict[str, Any]:
+        """Run validation on transformed ticker data."""
+        self.logger.logger.info("Starting transformed data validation")
+        
+        validation_results = {
+            "total_tickers": 0,
+            "valid_tickers": 0,
+            "invalid_tickers": 0,
+            "validation_issues": [],
+            "timestamp": datetime.now().isoformat()
+        }
         
         try:
-            logger.info(f"Starting macro transformation for series: {series_id}")
+            # Get available transformed tickers
+            from ..utils.gcs import list_available_tickers
+            tickers = list_available_tickers(bucket_name=self.config.storage.gcs_bucket)
+            validation_results["total_tickers"] = len(tickers)
             
-            with self.db.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Fetch macro data
-                    macro_model = MacroData()
-                    macro_data = macro_model.get_data(cursor)
+            # Sample validation on a subset of tickers
+            sample_size = min(100, len(tickers))
+            sample_tickers = tickers[:sample_size]
+            
+            self.logger.logger.info(f"Validating sample of {sample_size} tickers")
+            
+            for ticker in sample_tickers:
+                try:
+                    from ..utils.gcs import load_ticker_data
+                    df = load_ticker_data(ticker, self.config.storage.gcs_bucket)
                     
-                    if not macro_data:
-                        logger.error(f"No macro data found")
-                        return False
-                    
-                    macro_df = pd.DataFrame(macro_data)
-                    
-                    # Filter for specific series if provided
-                    if series_id:
-                        macro_df = macro_df[macro_df['series_id'] == series_id]
-                        if macro_df.empty:
-                            logger.error(f"No data found for series: {series_id}")
-                            return False
-                    
-                    # Validate data
-                    if self.config.validation_enabled:
-                        self.validator.validate_macro_data(macro_df)
-                    
-                    # Create transformed table
-                    transformed_macro_model = TransformedMacroData()
-                    transformed_macro_model.create_table(cursor)
-                    
-                    # Transform macro data
-                    transformed_macro_data = EnrichMacros(macro_df, series_id)
-                    enriched_macro_df = transformed_macro_data.transform_macro_data()
-
-                    # Insert transformed data
-                    if enriched_macro_df is not None and not enriched_macro_df.empty:
-                        transformed_macro_model.insert_data(
-                            self.engine,
-                            enriched_macro_df
-                        )
-                        logger.info(f"Transformed macro data for series {series_id} inserted into database")
+                    if df is not None and not df.empty:
+                        validation_result = self.batch_processor.validator.validate(df)
+                        if validation_result.is_valid:
+                            validation_results["valid_tickers"] += 1
+                        else:
+                            validation_results["invalid_tickers"] += 1
+                            validation_results["validation_issues"].append({
+                                "ticker": ticker,
+                                "issues": validation_result.issues,
+                                "quality_score": validation_result.quality_score
+                            })
                     else:
-                        logger.warning(f"No transformed macro data generated for series: {series_id}")
-                        return False
-            
-            self.monitor.end_timer(f"transform_macro_{series_id}")
-            return True
-            
-        except Exception as e:
-            # log_error_with_context(logger, e, f"transform_macro_{series_id}", {"series_id": series_id}) # This line was removed as per the edit hint
-            logger.error(f"Error transforming macro series {series_id}: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-    
-    def transform_all_tickers(self) -> Dict[str, bool]:
-        """
-        Transform data for all available tickers.
-        
-        Returns:
-            Dict[str, bool]: Dictionary mapping ticker symbols to success status
-        """
-        self.monitor.start_timer("transform_all_tickers")
-        
-        results = {}
-        
-        try:
-            with self.db.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    ticker_model = TickerData()
-                    ticker_data = ticker_model.get_data(cursor)
-                    
-                    if not ticker_data:
-                        logger.error("No ticker data found")
-                        return results
-                    
-                    ticker_df = pd.DataFrame(ticker_data)
-                    unique_tickers = ticker_df["ticker"].unique()
-                    
-                    logger.info(f"Found {len(unique_tickers)} unique tickers to transform")
-                    
-                    for ticker in unique_tickers:
-                        logger.info(f"Processing ticker: {ticker}")
-                        success = self.transform_tickers(ticker)
-                        results[ticker] = success
+                        validation_results["invalid_tickers"] += 1
+                        validation_results["validation_issues"].append({
+                            "ticker": ticker,
+                            "issues": ["No data found"],
+                            "quality_score": 0.0
+                        })
                         
-                        if not success:
-                            logger.error(f"Failed to transform ticker: {ticker}")
+                except Exception as e:
+                    validation_results["invalid_tickers"] += 1
+                    validation_results["validation_issues"].append({
+                        "ticker": ticker,
+                        "issues": [f"Validation error: {str(e)}"],
+                        "quality_score": 0.0
+                    })
             
-            self.monitor.end_timer("transform_all_tickers")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error in transform_all_tickers: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return results
-    
-    def transform_all_macros(self) -> Dict[str, bool]:
-        """
-        Transform data for all available macroeconomic series.
-        
-        Returns:
-            Dict[str, bool]: Dictionary mapping series IDs to success status
-        """
-        self.monitor.start_timer("transform_all_macros")
-        
-        results = {}
-        
-        try:
-            with self.db.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    macro_model = MacroData()
-                    macro_data = macro_model.get_data(cursor)
-                    
-                    if not macro_data:
-                        logger.error("No macro data found")
-                        return results
-                    
-                    macro_df = pd.DataFrame(macro_data)
-                    unique_series = macro_df["series_id"].unique()
-                    
-                    logger.info(f"Found {len(unique_series)} unique macro series to transform")
-                    
-                    for series_id in unique_series:
-                        logger.info(f"Processing macro series: {series_id}")
-                        success = self.transform_macro_data(series_id)
-                        results[series_id] = success
-                        
-                        if not success:
-                            logger.error(f"Failed to transform macro series: {series_id}")
-            
-            self.monitor.end_timer("transform_all_macros")
-            return results
+            self.logger.logger.info(f"Validation completed: {validation_results['valid_tickers']} valid, {validation_results['invalid_tickers']} invalid")
+            return validation_results
             
         except Exception as e:
-            logger.error(f"Error in transform_all_macros: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return results
-    
-    def get_performance_metrics(self) -> Dict[str, float]:
-        """
-        Get performance metrics for all operations.
-        
-        Returns:
-            Dict[str, float]: Dictionary of operation names and their durations
-        """
-        return self.monitor.get_metrics()
-    
-    def validate_transformation_results(self) -> bool:
-        """
-        Validate the results of the transformation process.
-        
-        Returns:
-            bool: True if validation passes
-        """
-        try:
-            # Check if transformed tables exist and have data
-            with self.db.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    # Check transformed ticker data
-                    cursor.execute("SELECT COUNT(*) FROM transformed_ticker_data")
-                    ticker_count = cursor.fetchone()[0]
-                    
-                    # Check transformed macro data
-                    cursor.execute("SELECT COUNT(*) FROM transformed_macro_data")
-                    macro_count = cursor.fetchone()[0]
-                    
-                    logger.info(f"Transformation validation - Ticker records: {ticker_count}, Macro records: {macro_count}")
-                    
-                    if ticker_count == 0 and macro_count == 0:
-                        logger.warning("No transformed data found")
-                        return False
-                    
-                    return True
-                    
-        except Exception as e:
-            logger.error(f"Error validating transformation results: {str(e)}")
-            return False
+            self.logger.logger.error(f"Failed to run validation: {e}")
+            return {"error": str(e)}
 
 
 def main():
-    """
-    Main function to run the complete data transformation pipeline.
-    
-    This function orchestrates the transformation of both ticker and macroeconomic data,
-    including performance monitoring and result validation.
-    """
-    logger.info("Starting CandleThrob data transformation pipeline")
-    
+    """Main function for command-line execution."""
     try:
-        # Initialize transformer with default configuration
-        transformer = CompleteDataTransform()
+        # Initialize configuration from environment
+        config = get_config()
         
-        # Transform all tickers
-        logger.info("Starting ticker transformation...")
-        ticker_results = transformer.transform_all_tickers()
+        # Create orchestrator and run complete transformation
+        orchestrator = TransformOrchestrator(config)
+        results = orchestrator.run_complete_transformation()
         
-        # Transform all macros
-        logger.info("Starting macro transformation...")
-        macro_results = transformer.transform_all_macros()
-        
-        # Get performance metrics
-        metrics = transformer.get_performance_metrics()
-        logger.info("Performance metrics: %s", metrics)
-        
-        # Validate results
-        validation_passed = transformer.validate_transformation_results()
-        
-        # Log summary
-        successful_tickers = sum(1 for success in ticker_results.values() if success)
-        successful_macros = sum(1 for success in macro_results.values() if success)
-        
-        logger.info(f"Transformation completed:")
-        logger.info(f"  - Tickers: {successful_tickers}/{len(ticker_results)} successful")
-        logger.info(f"  - Macros: {successful_macros}/{len(macro_results)} successful")
-        logger.info(f"  - Validation: {'PASSED' if validation_passed else 'FAILED'}")
-        
-        if validation_passed:
-            logger.info("All data transformed successfully")
+        # Exit with appropriate code
+        if results.get("error") or results.get("failed_tickers", 0) > 0:
+            exit(1)
         else:
-            logger.error("Data transformation completed with validation failures")
+            exit(0)
             
     except Exception as e:
-        logger.error(f"Critical error in transformation pipeline: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        sys.exit(1)
+        logger = get_transform_logger("main")
+        logger.logger.error(f"Fatal error in main: {str(e)}")
+        import traceback
+        logger.logger.error(f"Traceback: {traceback.format_exc()}")
+        exit(1)
 
 
 if __name__ == "__main__":
     main()
-

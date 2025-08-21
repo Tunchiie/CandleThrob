@@ -19,7 +19,7 @@ Key Features:
 - Advanced error categorization and handling
 - Comprehensive progress tracking and reporting
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 3.0.0
 Last Updated: 2025-07-14
 """
@@ -39,11 +39,9 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from functools import wraps
 from contextlib import contextmanager
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
 
-from CandleThrob.utils.logging_config import (
-    get_ingestion_logger, log_batch_state_start, log_batch_state_success, 
-    log_batch_state_error, AdvancedTransformLogger
-)
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Get logger for this module
 logger = get_ingestion_logger(__name__)
@@ -84,39 +82,6 @@ class AdvancedBatchStateConfig:
         if self.max_retries < 0:
             raise ValueError("max_retries must be non-negative")
 
-class PerformanceMonitor:
-    """performance monitoring for batch state operations."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    @contextmanager
-    def monitor_operation(self, operation_name: str):
-        """Context manager for operation monitoring."""
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        try:
-            yield
-            success = True
-            error_message = None
-        except Exception as e:
-            success = False
-            error_message = str(e)
-            raise
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-            
-            with self._lock:
-                self.metrics[operation_name] = {
-                    "duration": end_time - start_time,
-                    "memory_usage_mb": end_memory - start_memory,
-                    "success": success,
-                    "error_message": error_message,
-                    "timestamp": datetime.now().isoformat()
-                }
 
 def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
     """retry decorator with exponential backoff."""
@@ -142,60 +107,6 @@ def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
         return wrapper
     return decorator
 
-class DataQualityValidator:
-    """data quality validation for batch state data."""
-    
-    @staticmethod
-    def validate_batch_results(results: Dict[str, Any]) -> Tuple[bool, float, List[str]]:
-        """Validate batch results quality."""
-        issues = []
-        quality_score = 1.0
-        
-        if not results:
-            issues.append("No batch results found")
-            quality_score = 0.0
-            return False, quality_score, issues
-        
-        # Check required fields
-        required_fields = ['batch_number', 'results', 'timestamp']
-        missing_fields = [field for field in required_fields if field not in results]
-        if missing_fields:
-            issues.append(f"Missing required fields: {missing_fields}")
-            quality_score -= 0.3
-        
-        # Check results structure
-        results_data = results.get('results', {})
-        if not results_data:
-            issues.append("No results data found")
-            quality_score -= 0.3
-        
-        # Check success/failure counts
-        successful = results_data.get('successful', 0)
-        failed = results_data.get('failed', 0)
-        total = successful + failed
-        
-        if total == 0:
-            issues.append("No tickers processed")
-            quality_score -= 0.5
-        elif failed > successful:
-            issues.append(f"High failure rate: {failed}/{total} failed")
-            quality_score -= 0.3
-        
-        # Check timestamp validity
-        timestamp = results.get('timestamp')
-        if timestamp:
-            try:
-                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                age_hours = (datetime.now() - dt).total_seconds() / 3600
-                if age_hours > 24:
-                    issues.append(f"Old batch results: {age_hours:.1f} hours old")
-                    quality_score -= 0.2
-            except Exception:
-                issues.append("Invalid timestamp format")
-                quality_score -= 0.1
-        
-        quality_score = max(0.0, quality_score)
-        return quality_score >= 0.8, quality_score, issues
 
 class AdvancedBatchStateChecker:
     """
@@ -222,7 +133,7 @@ class AdvancedBatchStateChecker:
             >>> checker = AdvancedBatchStateChecker(AdvancedBatchStateConfig())
         """
         self.config = config or AdvancedBatchStateConfig()
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor("default")
         self.quality_validator = DataQualityValidator()
         
         logger.logger.info("AdvancedBatchStateChecker initialized with advanced configuration")

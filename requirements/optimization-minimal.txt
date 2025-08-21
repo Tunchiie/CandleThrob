@@ -1,0 +1,16 @@
+# Minimal optimization requirements for testing
+-r core.txt
+
+# Plaid API integration
+plaid-python>=9.0.0
+
+# Basic financial calculations
+scipy>=1.7.0
+numpy-financial>=1.0.0
+
+# Machine learning (lightweight)
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.7.0,<3.10.0
+plotly>=5.0.0

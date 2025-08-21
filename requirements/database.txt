@@ -1,0 +1,8 @@
+# Database specific requirements (optional for GCS-only deployments)
+-r core.txt
+
+# Oracle Database (Optional - for legacy support)
+sqlalchemy>=1.4.36,<2.0.0
+oci>=2.0.0
+oracledb>=2.0.0
+psycopg2-binary>=2.9.0

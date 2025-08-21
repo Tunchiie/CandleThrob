@@ -4,6 +4,7 @@ Macro Data Update Module for CandleThrob
 =======================================
 
 This module provides macroeconomic data update capabilities from FRED API.
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
 It includes advanced error handling, performance monitoring, data quality validation,
 incremental updates, and comprehensive reporting.
 
@@ -20,7 +21,7 @@ Key Features:
 - Modular design with configurable update rules
 - Advanced error categorization and handling
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 3.0.0
 Last Updated: 2025-07-14
 """
@@ -41,14 +42,9 @@ import pandas as pd
 import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from CandleThrob.ingestion.fetch_data import CompleteDataIngestion
-from CandleThrob.utils.models import MacroData
-from CandleThrob.utils.oracle_conn import OracleDB
-from CandleThrob.utils.logging_config import (
-    get_ingestion_logger, log_ingestion_start, log_ingestion_success, 
-    log_ingestion_error, log_macro_update_start, log_macro_update_success,
-    log_macro_update_error, AdvancedTransformLogger
-)
+from CandleThrob.ingestion.fetch_data import DataIngestion
+from CandleThrob.utils.gcs import save_macro_data, load_macro_data, list_available_macro_series
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Get logger for this module
 logger = get_ingestion_logger(__name__)
@@ -81,7 +77,7 @@ class MacroUpdateConfig:
         'FEDFUNDS', 'CPIAUCSL', 'UNRATE', 'GDP', 'GS10', 'USREC'
     ])
     update_frequency_hours: int = 24
-    max_update_age_days: int = 7
+    max_update_age_days: int = 365  # Not used for historical fetch (fetches since 2000)
     
     def __post_init__(self):
         """Validate configuration parameters."""
@@ -94,39 +90,6 @@ class MacroUpdateConfig:
         if self.max_retries < 0:
             raise ValueError("max_retries must be non-negative")
 
-class PerformanceMonitor:
-    """performance monitoring for macro update operations."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    @contextmanager
-    def monitor_operation(self, operation_name: str):
-        """Context manager for operation monitoring."""
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        try:
-            yield
-            success = True
-            error_message = None
-        except Exception as e:
-            success = False
-            error_message = str(e)
-            raise
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-            
-            with self._lock:
-                self.metrics[operation_name] = {
-                    "duration": end_time - start_time,
-                    "memory_usage_mb": end_memory - start_memory,
-                    "success": success,
-                    "error_message": error_message,
-                    "timestamp": datetime.now().isoformat()
-                }
 
 def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
     """retry decorator with exponential backoff."""
@@ -142,77 +105,16 @@ def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
                     last_exception = e
                     if attempt < max_retries:
                         delay = delay_seconds * (2 ** attempt)  # Exponential backoff
-                        logger.logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {str(e)}. Retrying in {delay:.2f}s...")
+                        logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {str(e)}. Retrying in {delay:.2f}s...")
                         time.sleep(delay)
                     else:
-                        logger.logger.error(f"All {max_retries + 1} attempts failed for {func.__name__}: {str(e)}")
+                        logger.error(f"All {max_retries + 1} attempts failed for {func.__name__}: {str(e)}")
                         raise last_exception
             
             return None
         return wrapper
     return decorator
 
-class DataQualityValidator:
-    """data quality validation for macro data."""
-    
-    @staticmethod
-    def validate_macro_data(df: pd.DataFrame) -> Tuple[bool, float, List[str]]:
-        """Validate macro data quality."""
-        issues = []
-        quality_score = 1.0
-        
-        if df.empty:
-            issues.append("DataFrame is empty")
-            quality_score = 0.0
-            return False, quality_score, issues
-        
-        # Check required columns
-        required_cols = ['date', 'series_id', 'value']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
-            issues.append(f"Missing required columns: {missing_cols}")
-            quality_score -= 0.3
-        
-        # Check for null values
-        null_ratio = df.isnull().sum().sum() / (len(df) * len(df.columns))
-        if null_ratio > 0.1:
-            issues.append(f"High null ratio: {null_ratio:.2%}")
-            quality_score -= 0.2
-        
-        # Check for expected indicators
-        expected_indicators = ['FEDFUNDS', 'CPIAUCSL', 'UNRATE', 'GDP', 'GS10', 'USREC']
-        available_indicators = df['series_id'].unique()
-        missing_indicators = [ind for ind in expected_indicators if ind not in available_indicators]
-        if missing_indicators:
-            issues.append(f"Missing expected indicators: {missing_indicators}")
-            quality_score -= 0.2
-        
-        # Check date range
-        if 'date' in df.columns:
-            try:
-                df['date'] = pd.to_datetime(df['date'])
-                date_span = (df['date'].max() - df['date'].min()).days
-                if date_span < 30:
-                    issues.append(f"Limited date range: {date_span} days")
-                    quality_score -= 0.1
-            except Exception:
-                issues.append("Invalid date format")
-                quality_score -= 0.2
-        
-        # Check for recent data
-        if 'date' in df.columns:
-            try:
-                recent_cutoff = datetime.now() - timedelta(days=30)
-                recent_data = df[df['date'] >= recent_cutoff]
-                if len(recent_data) == 0:
-                    issues.append("No recent data (last 30 days)")
-                    quality_score -= 0.3
-            except Exception:
-                issues.append("Error checking recent data")
-                quality_score -= 0.1
-        
-        quality_score = max(0.0, quality_score)
-        return quality_score >= 0.8, quality_score, issues
 
 class MacroDataUpdater:
     """
@@ -226,7 +128,7 @@ class MacroDataUpdater:
         config (MacroUpdateConfig): Configuration
         performance_monitor (PerformanceMonitor): Performance monitor
         quality_validator (DataQualityValidator): Data quality validator
-        db (OracleDB): Database connection
+        gcs_bucket (str): Google Cloud Storage bucket name for data storage
     """
     
     def __init__(self, config: Optional[MacroUpdateConfig] = None):
@@ -241,11 +143,11 @@ class MacroDataUpdater:
             >>> updater = MacroDataUpdater(MacroUpdateConfig())
         """
         self.config = config or MacroUpdateConfig()
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor("default")
         self.quality_validator = DataQualityValidator()
-        self.db = OracleDB()
+        self.gcs_bucket = os.getenv('GCS_BUCKET_NAME', 'candlethrob-wandata')
         
-        logger.logger.info("MacroDataUpdater initialized with configuration")
+        logger.info("MacroDataUpdater initialized with configuration")
     
     @retry_on_failure(max_retries=3, delay_seconds=2.0)
     def update_macro_data(self) -> Dict[str, Any]:
@@ -262,7 +164,7 @@ class MacroDataUpdater:
         operation_name = "update_macro_data"
         
         with self.performance_monitor.monitor_operation(operation_name):
-            log_macro_update_start("update_macro", "macro_data")
+            log_ingestion_start("update_macro", "macro_data")
             
             results = {
                 "status": "success",
@@ -277,171 +179,170 @@ class MacroDataUpdater:
             }
             
             try:
-                with self.db.establish_connection() as conn:
-                    with conn.cursor() as cursor:
-                        MacroData().create_table(cursor)
-                    
-                    # Check existing data and get last date
-                    macro_model = MacroData()
-                    if macro_model.data_exists(conn):
-                        last_date = macro_model.get_last_date(conn)
-                        if last_date:
-                            start_date = last_date + timedelta(days=1)
-                            logger.logger.info(f"Incremental macro update: fetching from {start_date}")
-                        else:
-                            start_date = None
-                            logger.logger.info("No valid macro date found, fetching all available data")
-                    else:
-                        start_date = None
-                        logger.logger.info("No existing macro data, fetching all available data")
-                    
-                    # Determine date range for fetching
-                    if start_date:
-                        end_date = datetime.now()
-                        if start_date.date() >= end_date.date():
-                            logger.logger.info("No new macro data to fetch")
-                            results["status"] = "no_new_data"
-                            results["end_time"] = datetime.now()
-                            return results
-                        
-                        data = CompleteDataIngestion(
-                            start_date=start_date.strftime("%Y-%m-%d"),
-                            end_date=end_date.strftime("%Y-%m-%d")
-                        )
-                    else:
-                        data = CompleteDataIngestion()
-                    
-                    # Fetch FRED data with advanced features
-                    logger.logger.info("Fetching FRED data with advanced features...")
-                    macro_df = data.fetch_fred_data()
-                    
-                    if macro_df is None or macro_df.empty:
-                        logger.logger.warning("No new macroeconomic data was fetched")
-                        results["status"] = "no_data_fetched"
-                        results["end_time"] = datetime.now()
-                        return results
-                    
-                    # Data quality validation
-                    quality_passed, quality_score, quality_issues = self.quality_validator.validate_macro_data(macro_df)
-                    results["quality_score"] = quality_score
-                    results["quality_issues"] = quality_issues
-                    
-                    if not quality_passed:
-                        logger.logger.error(f"Data quality validation failed: {quality_issues}")
-                        results["status"] = "quality_validation_failed"
-                        results["end_time"] = datetime.now()
-                        return results
-                    
-                    # Save to database with advanced features
-                    logger.logger.info(f"Saving {len(macro_df)} macro records to database")
-                    
-                    # Batch processing for large datasets
-                    if len(macro_df) > self.config.batch_size:
-                        batches = [macro_df[i:i + self.config.batch_size] 
-                                 for i in range(0, len(macro_df), self.config.batch_size)]
-                        
-                        for i, batch in enumerate(batches):
-                            logger.logger.info(f"Processing batch {i+1}/{len(batches)} ({len(batch)} records)")
-                            macro_model.insert_data(self.db.get_sqlalchemy_engine(), batch)
-                    else:
-                        macro_model.insert_data(self.db.get_sqlalchemy_engine(), macro_df)
-                    
-                    # Update results
-                    results["records_updated"] = len(macro_df)
-                    results["indicators_updated"] = len(macro_df['series_id'].unique())
+                logger.info("Using GCS for macro data storage")
+
+                # For GCS, fetch comprehensive historical data since 2000
+                # This ensures we have complete macroeconomic time series
+                start_date = datetime(2000, 1, 1)  # Start from January 1, 2000
+                logger.info(f"Fetching comprehensive macro data from {start_date} (historical fetch mode)")
+
+                # Fetch macro data
+                data = DataIngestion(
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=datetime.now().strftime("%Y-%m-%d")
+                )
+
+                macro_df = data.fetch_fred_data()
+
+                if macro_df is None or macro_df.empty:
+                    logger.warning("No new macroeconomic data was fetched")
+                    results["status"] = "no_data_fetched"
                     results["end_time"] = datetime.now()
                     results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
-                    
-                    logger.logger.info(f"Macro data update completed successfully")
-                    logger.logger.info(f"Updated {results['records_updated']} records for {results['indicators_updated']} indicators")
-                    logger.logger.info(f"Quality score: {quality_score:.2f}")
-                    
-                    log_macro_update_success("update_macro", "macro_data", results["records_updated"])
                     return results
+
+                # Validate data quality
+                is_valid, quality_score, issues = self.quality_validator.validate_macro_data(macro_df)
+                if not is_valid:
+                    logger.error(f"Data quality validation failed: {issues}")
+                    results["status"] = "validation_failed"
+                    results["quality_score"] = quality_score
+                    results["validation_issues"] = issues
+                    results["end_time"] = datetime.now()
+                    results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
+                    return results
+
+                logger.info(f"Data quality validation passed (score: {quality_score:.2f})")
+
+                # Save to GCS using parquet format
+                logger.info(f"Saving {len(macro_df)} macro records to GCS")
+
+                # Group by series_id and save each series separately
+                for series_id in macro_df['series_id'].unique():
+                    series_df = macro_df[macro_df['series_id'] == series_id]
+                    success = save_macro_data(series_df, series_id, self.gcs_bucket)
+
+                    if success:
+                        logger.info(f"Successfully saved {len(series_df)} records for series {series_id} to GCS")
+                    else:
+                        logger.error(f"Failed to save macro data for series {series_id} to GCS")
+                        results["status"] = "save_failed"
+                        results["end_time"] = datetime.now()
+                        results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
+                        return results
+
+                # Update results
+                results["records_updated"] = len(macro_df)
+                results["series_updated"] = len(macro_df['series_id'].unique())
+                results["quality_score"] = quality_score
+                results["status"] = "success"
+
+                logger.info(f"Successfully updated {results['records_updated']} macro records for {results['series_updated']} series")
+
+                # Save to GCS using parquet format
+                logger.info(f"Saving {len(macro_df)} macro records to GCS")
+
+                # Group by series_id and save each series separately
+                for series_id in macro_df['series_id'].unique():
+                    series_df = macro_df[macro_df['series_id'] == series_id]
+                    success = save_macro_data(series_df, series_id, self.gcs_bucket)
+
+                    if success:
+                        logger.info(f"Successfully saved {len(series_df)} records for series {series_id} to GCS")
+                    else:
+                        logger.error(f"Failed to save macro data for series {series_id} to GCS")
+                        results["status"] = "save_failed"
+                        results["end_time"] = datetime.now()
+                        results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
+                        return results
+
+                # Update results
+                results["records_updated"] = len(macro_df)
+                results["series_updated"] = len(macro_df['series_id'].unique())
+                results["status"] = "success"
+                results["end_time"] = datetime.now()
+                results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
+
+                logger.info(f"Macro data update completed successfully")
+                logger.info(f"Updated {results['records_updated']} records for {results['series_updated']} series")
+                logger.info(f"Quality score: {quality_score:.2f}")
+
+                log_ingestion_success("update_macro", "macro_data", results["records_updated"])
+                return results
                     
             except Exception as e:
                 error_msg = f"Error updating macro data: {str(e)}"
-                logger.logger.error(error_msg)
-                logger.logger.error(f"Traceback: {traceback.format_exc()}")
+                logger.error(error_msg)
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 results["status"] = "error"
                 results["errors"].append(error_msg)
                 results["end_time"] = datetime.now()
-                log_macro_update_error("update_macro", "macro_data", error_msg)
+                results["duration_seconds"] = (results["end_time"] - results["start_time"]).total_seconds()
+                log_ingestion_error("update_macro", "macro_data", error_msg)
                 return results
     
     @retry_on_failure(max_retries=3, delay_seconds=2.0)
-    def validate_macro_update(self) -> Dict[str, Any]:
+    def validate_gcs_update(self, macro_df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Validate the macro data update with advanced features.
-        
+        Validate the macro data update in GCS with comprehensive checks.
+
+        Args:
+            macro_df: The macro DataFrame that was saved
+
         Returns:
-            Dict[str, Any]: Comprehensive validation results
-            
-        Example:
-            >>> updater = MacroDataUpdater()
-            >>> results = updater.validate_macro_update()
+            Dict[str, Any]: Validation results with quality metrics
         """
-        operation_name = "validate_macro_update"
-        
+        operation_name = "validate_gcs_update"
+
         with self.performance_monitor.monitor_operation(operation_name):
-            log_macro_update_start("update_macro", "validation")
-            
+            log_ingestion_start("update_macro", "validation")
+
             try:
-                with self.db.establish_connection() as conn:
-                    # Check for recent data (last 30 days)
-                    recent_data = conn.execute("""
-                        SELECT COUNT(DISTINCT series_id) as recent_indicators,
-                               COUNT(*) as total_records
-                        FROM macro_data 
-                        WHERE date >= SYSDATE - 30
-                    """).fetchone()
-                    
-                    # Check for expected indicators
-                    available_indicators = conn.execute("""
-                        SELECT DISTINCT series_id FROM macro_data
-                        WHERE date >= SYSDATE - 30
-                    """).fetchall()
-                    available_indicators = [row[0] for row in available_indicators]
-                    missing_indicators = [ind for ind in self.config.expected_indicators 
-                                       if ind not in available_indicators]
-                    
-                    # Calculate quality score
-                    quality_score = 1.0
-                    quality_issues = []
-                    
-                    if recent_data[0] < self.config.min_indicators_required:
-                        quality_issues.append(f"Insufficient indicators: {recent_data[0]}/{self.config.min_indicators_required}")
-                        quality_score -= 0.3
-                    
-                    if missing_indicators:
-                        quality_issues.append(f"Missing indicators: {missing_indicators}")
-                        quality_score -= 0.2
-                    
-                    if recent_data[1] == 0:
-                        quality_issues.append("No recent records found")
-                        quality_score -= 0.5
-                    
-                    quality_score = max(0.0, quality_score)
-                    
-                    validation_results = {
-                        "recent_indicators": recent_data[0],
-                        "total_recent_records": recent_data[1],
-                        "available_indicators": available_indicators,
-                        "missing_indicators": missing_indicators,
-                        "quality_score": quality_score,
-                        "quality_issues": quality_issues,
-                        "validation_timestamp": datetime.now().isoformat()
-                    }
-                    
-                    logger.logger.info(f"Macro validation: {recent_data[0]} indicators, {recent_data[1]} records, quality score: {quality_score:.2f}")
-                    log_macro_update_success("update_macro", "validation", recent_data[1])
-                    return validation_results
-                    
+                # Get available series from GCS
+                available_series = list_available_macro_series(bucket_name=self.gcs_bucket)
+
+                # Check for expected indicators
+                missing_indicators = [ind for ind in self.config.expected_indicators
+                                   if ind not in available_series]
+
+                # Calculate quality score
+                quality_score = 1.0
+                quality_issues = []
+
+                if len(available_series) < self.config.min_indicators_required:
+                    quality_issues.append(f"Insufficient indicators: {len(available_series)}/{self.config.min_indicators_required}")
+                    quality_score -= 0.3
+
+                if missing_indicators:
+                    quality_issues.append(f"Missing indicators: {missing_indicators}")
+                    quality_score -= 0.2
+
+                if macro_df.empty:
+                    quality_issues.append("No recent records found")
+                    quality_score -= 0.5
+
+                quality_score = max(0.0, quality_score)
+
+                validation_results = {
+                    "available_series": len(available_series),
+                    "total_recent_records": len(macro_df),
+                    "available_indicators": available_series,
+                    "missing_indicators": missing_indicators,
+                    "quality_score": quality_score,
+                    "quality_issues": quality_issues,
+                    "is_valid": quality_score >= 0.7,
+                    "validation_timestamp": datetime.now().isoformat()
+                }
+
+                logger.info(f"GCS macro validation: {len(available_series)} series, {len(macro_df)} records, quality score: {quality_score:.2f}")
+                log_ingestion_success("update_macro", "validation", len(macro_df))
+                return validation_results
+
             except Exception as e:
                 error_msg = f"Error validating macro data: {str(e)}"
-                logger.logger.error(error_msg)
-                logger.logger.error(f"Traceback: {traceback.format_exc()}")
-                log_macro_update_error("update_macro", "validation", error_msg)
+                logger.error(error_msg)
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                log_ingestion_error("update_macro", "validation", error_msg)
                 return {"status": "error", "message": error_msg}
     
     def get_performance_metrics(self) -> Dict[str, Any]:
@@ -462,13 +363,11 @@ class MacroDataUpdater:
             "timestamp": datetime.now().isoformat()
         }
 
-# Backward compatibility alias
-# MacroDataUpdater is now the main class
 
 def main():
     """Main function for macro data update."""
     try:
-        logger.logger.info("Starting macro data update process...")
+        logger.info("Starting macro data update process...")
 
         updater = MacroDataUpdater()
         
@@ -476,7 +375,14 @@ def main():
         update_results = updater.update_macro_data()
         
         # Validate the update
-        validation_results = updater.validate_macro_update()
+        # For GCS validation, we can check available series
+        available_series = list_available_macro_series(bucket_name=updater.gcs_bucket)
+        validation_results = {
+            "available_series": len(available_series),
+            "series_list": available_series,
+            "validation_timestamp": datetime.now().isoformat(),
+            "is_valid": len(available_series) > 0
+        }
         
         # Get performance metrics
         performance_metrics = updater.get_performance_metrics()
@@ -502,8 +408,8 @@ def main():
         print(f"Indicators Updated: {update_results['indicators_updated']}")
         print(f"Quality Score: {update_results.get('quality_score', 0.0):.2f}")
         
-        if update_results['end_time']:
-            duration = update_results['duration_seconds']
+        if update_results.get('end_time'):
+            duration = update_results.get('duration_seconds', 0)
             print(f"Duration: {duration:.1f} seconds")
         
         if validation_results.get('recent_indicators'):
@@ -525,17 +431,17 @@ def main():
         
         print(f"Results saved to: {results_file}")
         
-        logger.logger.info("Macro data update process completed")
-        
+        logger.info("Macro data update process completed")
+
         # Exit with appropriate code
         if update_results['status'] == 'error':
             sys.exit(1)
         else:
             sys.exit(0)
-            
+
     except Exception as e:
-        logger.logger.error(f"Fatal error in macro update: {str(e)}")
-        logger.logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Fatal error in macro update: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         sys.exit(1)
 
 if __name__ == "__main__":

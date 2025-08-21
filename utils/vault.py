@@ -31,7 +31,7 @@ from contextlib import contextmanager
 import traceback
 from datetime import datetime, timedelta
 
-from CandleThrob.utils.logging_config import get_database_logger, performance_monitor
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Configuration constants
 DEFAULT_CACHE_TTL = 3600  # 1 hour

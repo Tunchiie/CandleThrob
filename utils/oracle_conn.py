@@ -1,124 +1,113 @@
-#!/usr/bin/env python3
 """
-Oracle Database Connection Module for CandleThrob
-=============================================================
+Oracle Database Connection Manager for CandleThrob
 
-This module provides Oracle database connection capabilities with
-advanced connection pooling, performance monitoring, and comprehensive error handling.
-
-Features:
-- Advanced error handling and retry logic with exponential backoff
-- Performance monitoring and metrics collection
-- Connection pooling and resource management
-- Memory usage optimization
-- Advanced logging and monitoring
-- Data lineage tracking and audit trails
-- Quality gates and validation checkpoints
-- Resource monitoring and optimization
-- Modular design with configurable connection management
-- Advanced error categorization and handling
-- Comprehensive connection health monitoring
+This module provides a robust Oracle database connection manager with advanced features
+including connection pooling, retry logic, performance monitoring, and comprehensive
+error handling.
 
 Author: Adetunji Fasiku
-Version: 4.0.0
-Last Updated: 2025-07-14
+Version: 2.0.0
 """
 
 import os
 import time
+import logging
 import threading
-import traceback
-import oracledb
 from contextlib import contextmanager
-from typing import Optional, Dict, Any, List, Union
-from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, Tuple
+from dataclasses import dataclass
 from functools import wraps
-from sqlalchemy import create_engine, event
-from sqlalchemy.pool import QueuePool
-from sqlalchemy.exc import SQLAlchemyError
-from CandleThrob.utils.vault import get_secret
-# Import centralized logging configuration
-from CandleThrob.utils.logging_config import get_database_logger, log_database_operation
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
 
-# Get logger for this module
-logger = get_database_logger("oracle_conn")
+try:
+    import oracledb
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.pool import QueuePool
+except ImportError as e:
+    print(f"Required packages not installed: {e}")
+    print("Please install: pip install oracledb sqlalchemy")
 
-logger.info("Initializing Oracle client")
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
-# Uncommented for container/Kestra deployment
-oracledb.init_oracle_client(lib_dir="/opt/oracle/instantclient_23_8")
+logger = get_database_logger(__name__)
 
 @dataclass
 class OracleConfig:
     """Configuration for Oracle database connections."""
-    
-    # Connection settings
-    max_connections: int = 20
-    min_connections: int = 5
+    user: str = os.getenv('ORACLE_USER', 'ADMIN')
+    password: str = os.getenv('ORACLE_PASSWORD', '')
+    dsn: str = os.getenv('ORACLE_DSN', 'candlethroblake_high')
+    config_dir: str = os.getenv('TNS_ADMIN', '/opt/oracle/instantclient_23_8/network/admin')
+    max_connections: int = 5
     connection_timeout: int = 30
-    query_timeout: int = 300
-    max_retries: int = 3
-    retry_delay_seconds: float = 1.0
-    
-    # Performance settings
-    max_memory_usage_mb: float = 1024.0
-    enable_connection_pooling: bool = True
+    enable_query_logging: bool = False
     enable_performance_monitoring: bool = True
-    enable_query_logging: bool = True
-    
-    # Quality thresholds
-    max_query_execution_time: float = 60.0
-    max_connection_errors: int = 5
-    
-    # Advanced features
-    enable_audit_trail: bool = True
-    enable_memory_optimization: bool = True
-    enable_data_lineage: bool = True
-    
-    def __post_init__(self):
-        """Validate configuration parameters."""
-        if self.max_connections <= 0:
-            raise ValueError("max_connections must be positive")
-        if self.min_connections < 0:
-            raise ValueError("min_connections must be non-negative")
-        if self.min_connections > self.max_connections:
-            raise ValueError("min_connections cannot exceed max_connections")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
-
-class PerformanceMonitor:
-    """Performance monitoring for database operations."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    def record_operation(self, operation_name: str, duration: float, success: bool, 
-                        error_message: Optional[str] = None, **kwargs):
-        """Record operation metrics."""
-        with self._lock:
-            self.metrics[operation_name] = {
-                "duration": duration,
-                "success": success,
-                "error_message": error_message,
-                "timestamp": time.time(),
-                **kwargs
-            }
 
 class ConnectionPool:
-    """Connection pool for Oracle database."""
+    """Manages Oracle database connection pool."""
     
-    def __init__(self, config: OracleConfig):
-        self.config = config
+    def __init__(self):
         self.engine = None
         self.connection_count = 0
-        self.error_count = 0
         self._lock = threading.Lock()
+
+
+def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
+    """Decorator for retrying database operations on failure."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay_seconds}s...")
+                        time.sleep(delay_seconds)
+                    else:
+                        logger.error(f"All {max_retries} attempts failed. Last error: {e}")
+            raise last_exception
+        return wrapper
+    return decorator
+
+class OracleDB:
+    """
+    Oracle Database Connection Manager with advanced features.
+    
+    Provides connection pooling, retry logic, performance monitoring,
+    and comprehensive error handling for Oracle database operations.
+    """
+    
+    def __init__(self, config: Optional[OracleConfig] = None):
+        """
+        Initialize Oracle database manager.
+        
+        Args:
+            config: Optional OracleConfig instance. If None, uses default configuration.
+        """
+        self.config = config or OracleConfig()
+        self.connection_pool = ConnectionPool()
+        self.performance_monitor = PerformanceMonitor("default")
+        
+        # Initialize connection pool
+        try:
+            connection_string = self._build_connection_string()
+            self.initialize_pool(connection_string)
+            logger.info("Oracle database manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Oracle database manager: {e}")
+            raise
+    
+    def _build_connection_string(self) -> str:
+        """Build SQLAlchemy connection string for Oracle."""
+        return f"oracle+oracledb://{self.config.user}:{self.config.password}@{self.config.dsn}"
     
     def initialize_pool(self, connection_string: str):
         """Initialize the connection pool."""
         try:
-            self.engine = create_engine(
+            self.connection_pool.engine = create_engine(
                 connection_string,
                 poolclass=QueuePool,
                 pool_size=self.config.max_connections,
@@ -131,159 +120,48 @@ class ConnectionPool:
             
             # Add event listeners for monitoring
             if self.config.enable_performance_monitoring:
-                event.listen(self.engine, 'before_cursor_execute', self._before_cursor_execute)
-                event.listen(self.engine, 'after_cursor_execute', self._after_cursor_execute)
+                event.listen(self.connection_pool.engine, 'before_cursor_execute', self._before_cursor_execute)
+                event.listen(self.connection_pool.engine, 'after_cursor_execute', self._after_cursor_execute)
             
             logger.info(f"Connection pool initialized with {self.config.max_connections} connections")
             
         except Exception as e:
-            logger.error(f"Failed to initialize connection pool: {str(e)}")
+            logger.error(f"Failed to initialize connection pool: {e}")
             raise
     
     def _before_cursor_execute(self, conn, cursor, statement, parameters, context, executemany):
-        """Record query start time."""
+        """Event listener for query start."""
         context._query_start_time = time.time()
     
     def _after_cursor_execute(self, conn, cursor, statement, parameters, context, executemany):
-        """Record query execution metrics."""
-        duration = time.time() - getattr(context, '_query_start_time', 0)
-        logger.debug(f"Query executed in {duration:.3f}s")
+        """Event listener for query completion."""
+        total_time = time.time() - context._query_start_time
+        self.performance_monitor.record_query_time(total_time)
         
-        if duration > self.config.max_query_execution_time:
-            logger.warning(f"Slow query detected: {duration:.3f}s")
-
-def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
-    """Retry decorator with exponential backoff."""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            
-            for attempt in range(max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_retries:
-                        delay = delay_seconds * (2 ** attempt)  # Exponential backoff
-                        logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {str(e)}. Retrying in {delay:.2f}s...")
-                        time.sleep(delay)
-                    else:
-                        logger.error(f"All {max_retries + 1} attempts failed for {func.__name__}: {str(e)}")
-                        raise last_exception
-            
-            return None
-        return wrapper
-    return decorator
-
-class OracleDB:
-    """
-    Oracle database connection manager.
-    
-    This class provides Oracle database connection capabilities
-    with advanced connection pooling, performance monitoring, and comprehensive
-    error handling.
-    
-    Attributes:
-        config (OracleConfig): Configuration
-        performance_monitor (PerformanceMonitor): Performance monitor
-        connection_pool (ConnectionPool): Connection pool manager
-        credentials (Dict[str, str]): Database credentials
-    """
-    
-    def __init__(self, config: Optional[OracleConfig] = None):
-        """
-        Initialize the OracleDB class.
-        
-        Args:
-            config (Optional[OracleConfig]): Configuration
-            
-        Example:
-            >>> db = OracleDB()
-            >>> db = OracleDB(OracleConfig())
-        """
-        self.config = config or OracleConfig()
-        self.performance_monitor = PerformanceMonitor()
-        self.connection_pool = ConnectionPool(self.config)
-        self.credentials = self._load_credentials()
-        
-        # Initialize connection pool
-        if self.config.enable_connection_pooling:
-            connection_string = self._build_connection_string()
-            self.connection_pool.initialize_pool(connection_string)
-        
-        logger.info("OracleDB initialized")
-    
-    def _load_credentials(self) -> Dict[str, str]:
-        """Load database credentials."""
-        try:
-            credentials = {
-                "user": get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaa6qj7ezmhqtuqxjn7f54xbpfalsszppuhoo6zilyxzra"),
-                "password": get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaf63vh4v5e3ozokfp32cyk2ct6qjo5eb6z5mutkoppl4q"),
-                "dsn": get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyacow4ffwcgtu6uwsw5ujw5w64eeashh5ndeldxzy3y52q")
-            }
-            logger.info(f"TNS_ADMIN: {os.environ.get('TNS_ADMIN')}")
-            logger.info(f"DSN from secret: '{credentials['dsn']}'")
-            with open(os.path.join(os.environ.get("TNS_ADMIN"), "tnsnames.ora")) as f:
-                logger.info(f"tnsnames.ora contents:\n{f.read()}")
-            # Validate credentials
-            if not all(credentials.values()):
-                raise ValueError("Oracle DB credentials are not properly configured")
-            
-            logger.info("Database credentials loaded successfully")
-            return credentials
-            
-        except Exception as e:
-            error_msg = f"Failed to load database credentials: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise ValueError(error_msg)
-    
-    def _build_connection_string(self) -> str:
-        """Build SQLAlchemy connection string."""
-        return f"oracle+oracledb://{self.credentials['user']}:{self.credentials['password']}@{self.credentials['dsn']}"
+        if total_time > 5.0:  # Log slow queries
+            logger.warning(f"Slow query detected: {total_time:.2f}s - {statement[:100]}...")
     
     @retry_on_failure(max_retries=3, delay_seconds=2.0)
     def get_sqlalchemy_engine(self):
         """
-        Create a SQLAlchemy engine.
+        Get SQLAlchemy engine for pandas operations.
         
         Returns:
-            Engine: SQLAlchemy engine for pandas operations
-            
-        Example:
-            >>> db = OracleDB()
-            >>> engine = db.get_sqlalchemy_engine()
+            Engine: SQLAlchemy engine
         """
-        operation_name = "get_sqlalchemy_engine"
-        start_time = time.time()
-        
         try:
             if self.connection_pool.engine:
-                #log_database_operation("get_engine", "Oracle DB") # This line was commented out in the original file
                 return self.connection_pool.engine
             else:
                 # Fallback to direct engine creation
                 connection_string = self._build_connection_string()
                 engine = create_engine(connection_string)
-                #log_database_operation("create_engine", "Oracle DB") # This line was commented out in the original file
                 return engine
                 
         except Exception as e:
-            error_msg = f"Failed to create SQLAlchemy engine: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            #log_database_operation("create_engine", "Oracle DB", error=error_msg) # This line was commented out in the original file
-            
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(
-                operation_name, duration, False, error_msg
-            )
+            logger.error(f"Failed to get SQLAlchemy engine: {e}")
             raise
-        else:
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(operation_name, duration, True)
-
+    
     @contextmanager
     def establish_connection(self):
         """
@@ -291,167 +169,85 @@ class OracleDB:
         
         Yields:
             Connection: Oracle database connection
-            
-        Example:
-            >>> db = OracleDB()
-            >>> with db.establish_connection() as conn:
-            >>>     # Use connection
         """
-        operation_name = "establish_connection"
-        start_time = time.time()
         conn = None
         
         try:
             logger.info("Establishing Oracle DB connection")
             
-            # Use connection pool if available
-            if self.connection_pool.engine:
-                conn = self.connection_pool.engine.raw_connection()
-            else:
-                # Fallback to direct connection
-                conn = oracledb.connect(
-                    user=self.credentials['user'],
-                    password=self.credentials['password'],
-                    dsn=self.credentials['dsn']
-                )
+            # Use the existing get_sqlalchemy_engine method
+            engine = self.get_sqlalchemy_engine()
+            conn = engine.connect()
             
             with self.performance_monitor._lock:
                 self.connection_pool.connection_count += 1
             
-            #log_database_operation("connect", "Oracle DB") # This line was commented out in the original file
             yield conn
             
-        except oracledb.DatabaseError as e:
-            error_msg = f"Database error: {str(e)}"
-            logger.error(error_msg)
-            #log_database_operation("connect", "Oracle DB", error=error_msg) # This line was commented out in the original file
-            
-            with self.performance_monitor._lock:
-                self.connection_pool.error_count += 1
-            
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(
-                operation_name, duration, False, error_msg
-            )
-            raise
-            
         except Exception as e:
-            error_msg = f"Connection error: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            #log_database_operation("connect", "Oracle DB", error=error_msg) # This line was commented out in the original file
-            
-            with self.performance_monitor._lock:
-                self.connection_pool.error_count += 1
-            
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(
-                operation_name, duration, False, error_msg
-            )
+            logger.error(f"Database connection failed: {e}")
             raise
-            
         finally:
             if conn:
                 try:
                     conn.close()
-                    logger.info("Oracle DB connection closed")
+                    with self.performance_monitor._lock:
+                        self.connection_pool.connection_count -= 1
+                    logger.debug("Database connection closed")
                 except Exception as e:
-                    logger.warning(f"Error closing connection: {str(e)}")
-            
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(operation_name, duration, True)
-    
-    @retry_on_failure(max_retries=3, delay_seconds=2.0)
-    def query_adb(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Any]:
-        """
-        Execute a query on the Oracle DB.
-        
-        Args:
-            query (str): The SQL query to execute
-            params (Optional[Dict[str, Any]]): Query parameters
-            
-        Returns:
-            List[Any]: List of results from the query
-            
-        Example:
-            >>> db = OracleDB()
-            >>> results = db.query_adb("SELECT * FROM ticker_data WHERE ticker = :ticker", {"ticker": "AAPL"})
-        """
-        operation_name = "query_adb"
-        start_time = time.time()
-        
-        try:
-            with self.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    if params:
-                        cursor.execute(query, params)
-                    else:
-                        cursor.execute(query)
-                    
-                    results = cursor.fetchall()
-                    #log_database_operation("query", "Oracle DB", len(results)) # This line was commented out in the original file
-                    
-                    duration = time.time() - start_time
-                    self.performance_monitor.record_operation(
-                        operation_name, duration, True, 
-                        rows_returned=len(results)
-                    )
-                    
-                    return results
-                    
-        except Exception as e:
-            error_msg = f"Query execution failed: {str(e)}"
-            logger.error(error_msg)
-            logger.error(f"Query: {query}")
-            logger.error(f"Parameters: {params}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            duration = time.time() - start_time
-            self.performance_monitor.record_operation(
-                operation_name, duration, False, error_msg
-            )
-            raise
+                    logger.error(f"Error closing connection: {e}")
     
     def get_connection_stats(self) -> Dict[str, Any]:
         """
-        Get comprehensive connection statistics and health metrics.
+        Get connection pool statistics.
         
         Returns:
-            Dict[str, Any]: Connection statistics and health information
-        """
-        return {
-            "connection_count": self.connection_pool.connection_count,
-            "error_count": self.connection_pool.error_count,
-            "error_rate": (self.connection_pool.error_count / max(self.connection_pool.connection_count, 1)) * 100,
-            "performance_metrics": self.performance_monitor.metrics,
-            "config": {
-                "max_connections": self.config.max_connections,
-                "min_connections": self.config.min_connections,
-                "connection_timeout": self.config.connection_timeout,
-                "query_timeout": self.config.query_timeout
-            },
-            "timestamp": time.time()
-        }
-    
-    def health_check(self) -> bool:
-        """
-        Perform a comprehensive health check of the database connection.
-        
-        Returns:
-            bool: True if healthy, False otherwise
+            Dict containing connection statistics
         """
         try:
-            with self.establish_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("SELECT 1 FROM DUAL")
-                    result = cursor.fetchone()
-                    return result[0] == 1
+            engine = self.connection_pool.engine
+            if engine and hasattr(engine.pool, 'size'):
+                return {
+                    "pool_size": engine.pool.size(),
+                    "checked_in": engine.pool.checkedin(),
+                    "checked_out": engine.pool.checkedout(),
+                    "overflow": engine.pool.overflow(),
+                    "invalid": engine.pool.invalid(),
+                    "active_connections": self.connection_pool.connection_count
+                }
+            else:
+                return {"status": "Pool not initialized"}
         except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
-            return False
+            logger.error(f"Error getting connection stats: {e}")
+            return {"error": str(e)}
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        Get performance statistics.
+        
+        Returns:
+            Dict containing performance metrics
+        """
+        try:
+            with self.performance_monitor._lock:
+                query_times = self.performance_monitor.query_times.copy()
+            
+            if not query_times:
+                return {"status": "No queries recorded"}
+            
+            return {
+                "total_queries": len(query_times),
+                "avg_query_time": sum(query_times) / len(query_times),
+                "min_query_time": min(query_times),
+                "max_query_time": max(query_times),
+                "slow_queries": len([t for t in query_times if t > 5.0])
+            }
+        except Exception as e:
+            logger.error(f"Error getting performance stats: {e}")
+            return {"error": str(e)}
 
-
-# Legacy function for backward compatibility
+# Convenience function for backward compatibility
 def get_oracle_connection():
-    """Legacy function for backward compatibility."""
-    return OracleDB()
+    """Get Oracle database connection (legacy function)."""
+    db = OracleDB()
+    return db.establish_connection()

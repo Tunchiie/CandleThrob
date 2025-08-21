@@ -1,0 +1,17 @@
+# Data ingestion specific requirements
+-r core.txt
+
+# Financial data APIs
+polygon-api-client>=1.15.1
+yfinance>=0.2.18
+fredapi>=0.5.2
+tqdm>=4.67.1
+lxml>=4.9.0
+beautifulsoup4>=4.13.4
+httpx>=0.28.1
+
+# Web scraping
+certifi>=2025.7.9
+charset-normalizer>=3.4.2
+urllib3>=2.5.0
+websockets>=14.2

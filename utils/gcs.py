@@ -34,10 +34,10 @@ import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from CandleThrob.utils.logging_config import get_database_logger, performance_monitor
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Configuration constants
-DEFAULT_BUCKET = "candlethrob-candata"
+DEFAULT_BUCKET = "candlethrob-wandata"
 DEFAULT_RETRY_ATTEMPTS = 3
 DEFAULT_RETRY_DELAY = 1  # seconds
 DEFAULT_MAX_RETRY_DELAY = 60  # seconds
@@ -48,10 +48,11 @@ MAX_CACHE_SIZE = 50  # Maximum number of cached files
 # Storage configuration constants
 BUCKET_PATHS = {
     'raw_tickers': 'raw/tickers',
-    'raw_etfs': 'raw/etfs', 
+    'raw_etfs': 'raw/etfs',
     'raw_macros': 'raw/macros',
     'processed_tickers': 'processed/tickers',
     'processed_etfs': 'processed/etfs',
+    'processed_macros': 'processed/macros',
     'analysis': 'analysis'
 }
 
@@ -66,7 +67,7 @@ class GCSConfig:
     cache_ttl: int = DEFAULT_CACHE_TTL
     enable_caching: bool = True
     enable_performance_monitoring: bool = True
-    enable_mock_mode: bool = True  # Default to mock for development
+    enable_mock_mode: bool = False  # Enable real GCS by default
     max_cache_size: int = MAX_CACHE_SIZE
     enable_health_monitoring: bool = True
     enable_batch_progress: bool = True
@@ -269,29 +270,52 @@ class AdvancedGCSClient:
         self.health_monitor = GCSHealthMonitor()
         self._client = None
         self._client_lock = threading.Lock()
+
+        # Initialize the client
+        self._initialize_client()
     
     def _initialize_client(self) -> bool:
         """Initialize the GCS client with error handling."""
         try:
-            with performance_monitor("gcs_client_initialization"):
-                with self._client_lock:
-                    if self._client is not None:
-                        return True
-                    
-                    # In mock mode, we don't need a real client
-                    if self.config.enable_mock_mode:
-                        self.logger.info("GCS client initialized in mock mode")
-                        return True
-                    
-                    # TODO: Initialize real GCS client when not in mock mode
-                    # from google.cloud import storage
-                    # self._client = storage.Client()
-                    
-                    self.logger.info("GCS client initialized successfully")
+            with self._client_lock:
+                if self._client is not None:
                     return True
+
+                # In mock mode, we don't need a real client
+                if self.config.enable_mock_mode:
+                    self.logger.info("GCS client initialized in mock mode")
+                    return True
+
+                # Initialize real GCS client
+                try:
+                    from google.cloud import storage
+                    import os
                     
+                    # Check for service account credentials
+                    if os.path.exists('/app/gcp-key.json'):
+                        # Use service account file
+                        self._client = storage.Client.from_service_account_json('/app/gcp-key.json')
+                        self.logger.info("GCS client initialized successfully using service account file")
+                    elif os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+                        # Use credentials from environment variable
+                        self._client = storage.Client()
+                        self.logger.info("GCS client initialized successfully using environment credentials")
+                    else:
+                        # Try default credentials
+                        self._client = storage.Client()
+                        self.logger.info("GCS client initialized successfully using default credentials")
+                    return True
+                except ImportError as e:
+                    self.logger.warning(f"Google Cloud Storage library not available: {e}")
+                    self.logger.warning("Falling back to mock mode. Install google-cloud-storage to enable real GCS operations.")
+                    self.config.enable_mock_mode = True
+                    self.logger.info("GCS client initialized in mock mode (fallback)")
+                    return True
+
         except Exception as e:
             self.logger.error(f"Failed to initialize GCS client: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def _validate_bucket_name(self, bucket_name: str) -> bool:
@@ -358,13 +382,19 @@ class AdvancedGCSClient:
                     success = True
                     file_size = len(data.to_parquet()) if not data.empty else 0
                 else:
-                    # TODO: Implement real GCS upload
-                    # bucket = self._client.bucket(bucket_name)
-                    # blob = bucket.blob(destination_blob_name)
-                    # buffer = BytesIO()
-                    # data.to_parquet(buffer, index=False)
-                    # blob.upload_from_string(buffer.getvalue())
-                    pass
+                    # Real GCS upload
+                    if not self._initialize_client():
+                        self.logger.error("Failed to initialize GCS client")
+                        return False
+
+                    bucket = self._client.bucket(bucket_name)
+                    blob = bucket.blob(destination_blob_name)
+                    buffer = BytesIO()
+                    data.to_parquet(buffer, index=False)
+                    buffer.seek(0)
+                    blob.upload_from_file(buffer, content_type='application/octet-stream')
+                    success = True
+                    file_size = len(buffer.getvalue())
                 
         except Exception as e:
             success = False
@@ -472,12 +502,15 @@ class AdvancedGCSClient:
                     self.logger.warning(f"Mock GCS load: gs://{bucket_name}/{source_blob_name} (returning None)")
                     return None
                 else:
-                    # TODO: Implement real GCS download
-                    # bucket = self._client.bucket(bucket_name)
-                    # blob = bucket.blob(source_blob_name)
-                    # buffer = BytesIO(blob.download_as_bytes())
-                    # return pd.read_parquet(buffer)
-                    pass
+                    # Real GCS download
+                    if not self._initialize_client():
+                        self.logger.error("Failed to initialize GCS client")
+                        return None
+
+                    bucket = self._client.bucket(bucket_name)
+                    blob = bucket.blob(source_blob_name)
+                    buffer = BytesIO(blob.download_as_bytes())
+                    return pd.read_parquet(buffer)
                 
         except Exception as e:
             self.logger.error(f"Failed to load from gs://{bucket_name}/{source_blob_name}: {e}")
@@ -507,11 +540,14 @@ class AdvancedGCSClient:
                     self.logger.info(f"Mock GCS exists check: gs://{bucket_name}/{blob_name} (returning False)")
                     return False
                 else:
-                    # TODO: Implement real GCS existence check
-                    # bucket = self._client.bucket(bucket_name)
-                    # blob = bucket.blob(blob_name)
-                    # return blob.exists()
-                    pass
+                    # Real GCS existence check
+                    if not self._initialize_client():
+                        self.logger.error("Failed to initialize GCS client")
+                        return False
+
+                    bucket = self._client.bucket(bucket_name)
+                    blob = bucket.blob(blob_name)
+                    return blob.exists()
                 
         except Exception as e:
             self.logger.error(f"Failed to check existence of gs://{bucket_name}/{blob_name}: {e}")
@@ -541,11 +577,14 @@ class AdvancedGCSClient:
                     self.logger.info(f"Mock GCS list: prefix '{prefix}' in bucket '{bucket_name}' (returning empty list)")
                     return []
                 else:
-                    # TODO: Implement real GCS list operation
-                    # bucket = self._client.bucket(bucket_name)
-                    # blobs = bucket.list_blobs(prefix=prefix)
-                    # return [blob.name for blob in blobs]
-                    pass
+                    # Real GCS list operation
+                    if not self._initialize_client():
+                        self.logger.error("Failed to initialize GCS client")
+                        return []
+
+                    bucket = self._client.bucket(bucket_name)
+                    blobs = bucket.list_blobs(prefix=prefix)
+                    return [blob.name for blob in blobs]
                 
         except Exception as e:
             self.logger.error(f"Failed to list blobs with prefix '{prefix}' in bucket '{bucket_name}': {e}")
@@ -575,12 +614,15 @@ class AdvancedGCSClient:
                     self.logger.info(f"Mock GCS delete: gs://{bucket_name}/{blob_name}")
                     return True
                 else:
-                    # TODO: Implement real GCS delete operation
-                    # bucket = self._client.bucket(bucket_name)
-                    # blob = bucket.blob(blob_name)
-                    # blob.delete()
-                    # return True
-                    pass
+                    # Real GCS delete operation
+                    if not self._initialize_client():
+                        self.logger.error("Failed to initialize GCS client")
+                        return False
+
+                    bucket = self._client.bucket(bucket_name)
+                    blob = bucket.blob(blob_name)
+                    blob.delete()
+                    return True
                 
         except Exception as e:
             self.logger.error(f"Failed to delete gs://{bucket_name}/{blob_name}: {e}")
@@ -838,18 +880,31 @@ def get_bucket_info(bucket_name: str) -> dict:
 def test_gcs_connection(bucket_name: str) -> bool:
     """
     Test connection to Google Cloud Storage and verify bucket access.
-    
+
     Args:
         bucket_name (str): The name of the GCS bucket to test
-        
+
     Returns:
         bool: True if connection successful, False otherwise
     """
     try:
-        # Mock connection test for development/testing
         logger = get_database_logger(__name__)
-        logger.info(f"Mock GCS connection test for bucket '{bucket_name}': SUCCESS")
-        return True
+        client = get_gcs_client()
+
+        if client.config.enable_mock_mode:
+            logger.info(f"Mock GCS connection test for bucket '{bucket_name}': SUCCESS")
+            return True
+        else:
+            # Real GCS connection test - try to check if a test blob exists (doesn't matter if it exists or not)
+            logger.info(f"Testing real GCS connection to bucket '{bucket_name}'...")
+            try:
+                # This will test bucket access without needing the blob to exist
+                client.blob_exists(bucket_name, "test-connection-blob")
+                logger.info(f"Real GCS connection test for bucket '{bucket_name}': SUCCESS")
+                return True
+            except Exception as e:
+                logger.error(f"Real GCS connection test for bucket '{bucket_name}': FAILED - {e}")
+                return False
             
     except Exception as e:
         logger = get_database_logger(__name__)
@@ -884,3 +939,445 @@ def get_gcs_cache_stats() -> Optional[Dict[str, Any]]:
     """Get cache statistics if caching is enabled."""
     client = get_gcs_client()
     return client.get_cache_stats()
+
+def enable_real_gcs_mode():
+    """Enable real GCS mode (requires google-cloud-storage library)."""
+    global _gcs_client
+    _gcs_client = None  # Force re-initialization
+    config = GCSConfig(enable_mock_mode=False)
+    return get_gcs_client(config)
+
+def enable_mock_gcs_mode():
+    """Enable mock GCS mode for development/testing."""
+    global _gcs_client
+    _gcs_client = None  # Force re-initialization
+    config = GCSConfig(enable_mock_mode=True)
+    return get_gcs_client(config)
+
+# Data model functions for direct integration with existing pipeline
+
+def save_ticker_data(df: pd.DataFrame, ticker: Optional[str] = None, bucket_name: str = DEFAULT_BUCKET) -> bool:
+    """
+    Save ticker data to GCS incrementally.
+
+    Args:
+        df: DataFrame with ticker data
+        ticker: Optional ticker symbol (will be inferred if not provided)
+        bucket_name: GCS bucket name
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Infer ticker if not provided
+        if ticker is None:
+            if 'ticker' in df.columns:
+                ticker = df['ticker'].iloc[0]
+            else:
+                raise ValueError("Ticker must be provided or present in DataFrame")
+
+        # Generate file path: {ticker}_data.parquet
+        file_path = get_standard_path('raw_tickers', f"{ticker}_data")
+
+        # Check if existing data exists and merge incrementally
+        existing_df = load_ticker_data(ticker, bucket_name=bucket_name)
+
+        if existing_df is not None and not existing_df.empty:
+            logger = get_database_logger(__name__)
+            logger.info(f"Found existing data for {ticker}: {len(existing_df)} records")
+
+            # Get latest date from existing data
+            if 'trade_date' in existing_df.columns:
+                existing_df['trade_date'] = pd.to_datetime(existing_df['trade_date'])
+                latest_date = existing_df['trade_date'].max()
+                logger.info(f"Latest date in existing data: {latest_date}")
+
+                # Filter new data to only include records after latest date
+                if 'trade_date' in df.columns:
+                    df['trade_date'] = pd.to_datetime(df['trade_date'])
+                    new_data = df[df['trade_date'] > latest_date]
+
+                    if new_data.empty:
+                        logger.info(f"No new data to add for {ticker}")
+                        return True
+
+                    logger.info(f"Adding {len(new_data)} new records for {ticker}")
+                    # Combine existing and new data
+                    combined_df = pd.concat([existing_df, new_data], ignore_index=True)
+                    combined_df = combined_df.sort_values('trade_date').drop_duplicates(subset=['trade_date'], keep='last')
+                else:
+                    # If no trade_date column, just append
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+            else:
+                # If no trade_date column in existing data, just append
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+        else:
+            logger = get_database_logger(__name__)
+            logger.info(f"No existing data for {ticker}, saving all {len(df)} records")
+            combined_df = df
+
+        # Upload combined data to GCS
+        return upload_to_gcs(bucket_name, combined_df, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error saving ticker data for {ticker}: {e}")
+        return False
+
+def load_ticker_data(ticker: str, date_str: Optional[str] = None, bucket_name: str = DEFAULT_BUCKET) -> Optional[pd.DataFrame]:
+    """
+    Load ticker data from GCS.
+
+    Args:
+        ticker: Ticker symbol
+        date_str: Not used (kept for backward compatibility)
+        bucket_name: GCS bucket name
+
+    Returns:
+        DataFrame with ticker data or None if not found
+    """
+    try:
+        # Use the new naming convention: {ticker}_data.parquet
+        file_path = get_standard_path('raw_tickers', f"{ticker}_data")
+        return load_from_gcs(bucket_name, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error loading ticker data for {ticker}: {e}")
+        return None
+
+def save_macro_data(df: pd.DataFrame, series_id: str = None, bucket_name: str = DEFAULT_BUCKET) -> bool:
+    """
+    Save macro data to GCS incrementally.
+
+    Args:
+        df: DataFrame with macro data
+        series_id: Optional series ID (will be inferred if not provided)
+        bucket_name: GCS bucket name
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Infer series_id if not provided
+        if series_id is None:
+            if 'series_id' in df.columns:
+                series_id = df['series_id'].iloc[0]
+            else:
+                raise ValueError("Series ID must be provided or present in DataFrame")
+
+        # Generate file path: {series_id}_data.parquet
+        file_path = get_standard_path('raw_macros', f"{series_id}_data")
+
+        # Check if existing data exists and merge incrementally
+        existing_df = load_macro_data(series_id, bucket_name=bucket_name)
+
+        if existing_df is not None and not existing_df.empty:
+            logger = get_database_logger(__name__)
+            logger.info(f"Found existing data for {series_id}: {len(existing_df)} records")
+
+            # Get latest date from existing data
+            if 'trade_date' in existing_df.columns:
+                existing_df['trade_date'] = pd.to_datetime(existing_df['trade_date'])
+                latest_date = existing_df['trade_date'].max()
+                logger.info(f"Latest date in existing data: {latest_date}")
+
+                # Filter new data to only include records after latest date
+                if 'trade_date' in df.columns:
+                    df['trade_date'] = pd.to_datetime(df['trade_date'])
+                    new_data = df[df['trade_date'] > latest_date]
+
+                    if new_data.empty:
+                        logger.info(f"No new data to add for {series_id}")
+                        return True
+
+                    logger.info(f"Adding {len(new_data)} new records for {series_id}")
+                    # Combine existing and new data
+                    combined_df = pd.concat([existing_df, new_data], ignore_index=True)
+                    combined_df = combined_df.sort_values('trade_date').drop_duplicates(subset=['trade_date'], keep='last')
+                else:
+                    # If no trade_date column, just append
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+            else:
+                # If no trade_date column in existing data, just append
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+        else:
+            logger = get_database_logger(__name__)
+            logger.info(f"No existing data for {series_id}, saving all {len(df)} records")
+            combined_df = df
+
+        # Upload combined data to GCS
+        return upload_to_gcs(bucket_name, combined_df, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error saving macro data for {series_id}: {e}")
+        return False
+
+def load_macro_data(series_id: str, date_str: str = None, bucket_name: str = DEFAULT_BUCKET) -> Optional[pd.DataFrame]:
+    """
+    Load macro data from GCS.
+
+    Args:
+        series_id: Series identifier
+        date_str: Not used (kept for backward compatibility)
+        bucket_name: GCS bucket name
+
+    Returns:
+        DataFrame with macro data or None if not found
+    """
+    try:
+        # Use the new naming convention: {series_id}_data.parquet
+        file_path = get_standard_path('raw_macros', f"{series_id}_data")
+        return load_from_gcs(bucket_name, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error loading macro data for {series_id}: {e}")
+        return None
+
+def save_transformed_ticker_data(df: pd.DataFrame, ticker: str = None, bucket_name: str = DEFAULT_BUCKET) -> bool:
+    """
+    Save transformed ticker data with technical indicators to GCS.
+
+    Args:
+        df: DataFrame with transformed ticker data and technical indicators
+        ticker: Optional ticker symbol (will be inferred if not provided)
+        bucket_name: GCS bucket name
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Infer ticker if not provided
+        if ticker is None:
+            if 'ticker' in df.columns:
+                ticker = df['ticker'].iloc[0]
+            else:
+                raise ValueError("Ticker must be provided or present in DataFrame")
+
+        # Generate file path for incremental storage: {ticker}_data.parquet
+        file_path = get_standard_path('processed_tickers', f"{ticker}_data")
+
+        # Check if existing transformed data exists and merge incrementally
+        existing_df = load_transformed_ticker_data(ticker, bucket_name=bucket_name)
+
+        if existing_df is not None and not existing_df.empty:
+            logger = get_database_logger(__name__)
+            logger.info(f"Found existing transformed data for {ticker}: {len(existing_df)} records")
+
+            # Get latest date from existing data
+            if 'trade_date' in existing_df.columns:
+                existing_df['trade_date'] = pd.to_datetime(existing_df['trade_date'])
+                latest_date = existing_df['trade_date'].max()
+                logger.info(f"Latest date in existing transformed data: {latest_date}")
+
+                # Filter new data to only include records after latest date
+                if 'trade_date' in df.columns:
+                    df['trade_date'] = pd.to_datetime(df['trade_date'])
+                    new_data = df[df['trade_date'] > latest_date]
+
+                    if new_data.empty:
+                        logger.info(f"No new transformed data to add for {ticker}")
+                        return True
+
+                    logger.info(f"Adding {len(new_data)} new transformed records for {ticker}")
+                    # Combine existing and new data
+                    combined_df = pd.concat([existing_df, new_data], ignore_index=True)
+                    combined_df = combined_df.sort_values('trade_date').drop_duplicates(subset=['trade_date'], keep='last')
+                else:
+                    # If no trade_date column, just append
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+            else:
+                # If no trade_date column in existing data, just append
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+        else:
+            logger = get_database_logger(__name__)
+            logger.info(f"No existing transformed data for {ticker}, saving all {len(df)} records")
+            combined_df = df
+
+        # Upload combined data to GCS
+        return upload_to_gcs(bucket_name, combined_df, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error saving transformed ticker data for {ticker}: {e}")
+        return False
+
+def load_transformed_ticker_data(ticker: str, date_str: str = None, bucket_name: str = DEFAULT_BUCKET) -> Optional[pd.DataFrame]:
+    """
+    Load transformed ticker data from GCS.
+
+    Args:
+        ticker: Ticker symbol
+        date_str: Not used (kept for backward compatibility)
+        bucket_name: GCS bucket name
+
+    Returns:
+        DataFrame with transformed ticker data or None if not found
+    """
+    try:
+        # Use the new naming convention: {ticker}_data.parquet
+        file_path = get_standard_path('processed_tickers', f"{ticker}_data")
+        return load_from_gcs(bucket_name, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error loading transformed ticker data for {ticker}: {e}")
+        return None
+
+def save_transformed_macro_data(df: pd.DataFrame, series_id: str = None, bucket_name: str = DEFAULT_BUCKET) -> bool:
+    """
+    Save transformed macro data to GCS.
+
+    Args:
+        df: DataFrame with transformed macro data
+        series_id: Optional series ID (will be inferred if not provided)
+        bucket_name: GCS bucket name
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Infer series_id if not provided
+        if series_id is None:
+            if 'series_id' in df.columns:
+                series_id = df['series_id'].iloc[0]
+            else:
+                raise ValueError("Series ID must be provided or present in DataFrame")
+
+        # Generate file path for incremental storage: {series_id}_data.parquet
+        # Store in processed/macros for consistency with ticker data
+        file_path = get_standard_path('processed_macros', f"{series_id}_data")
+
+        # Check if existing transformed macro data exists and merge incrementally
+        existing_df = load_transformed_macro_data(series_id, bucket_name=bucket_name)
+
+        if existing_df is not None and not existing_df.empty:
+            logger = get_database_logger(__name__)
+            logger.info(f"Found existing transformed macro data for {series_id}: {len(existing_df)} records")
+
+            # Get latest date from existing data
+            if 'date' in existing_df.columns:
+                existing_df['date'] = pd.to_datetime(existing_df['date'])
+                latest_date = existing_df['date'].max()
+                logger.info(f"Latest date in existing transformed macro data: {latest_date}")
+
+                # Filter new data to only include records after latest date
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    new_data = df[df['date'] > latest_date]
+
+                    if new_data.empty:
+                        logger.info(f"No new transformed macro data to add for {series_id}")
+                        return True
+
+                    logger.info(f"Adding {len(new_data)} new transformed macro records for {series_id}")
+                    # Combine existing and new data
+                    combined_df = pd.concat([existing_df, new_data], ignore_index=True)
+                    combined_df = combined_df.sort_values('date').drop_duplicates(subset=['date'], keep='last')
+                else:
+                    # If no date column, just append
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+            else:
+                # If no date column in existing data, just append
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+        else:
+            logger = get_database_logger(__name__)
+            logger.info(f"No existing transformed macro data for {series_id}, saving all {len(df)} records")
+            combined_df = df
+
+        # Upload combined data to GCS
+        return upload_to_gcs(bucket_name, combined_df, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error saving transformed macro data for {series_id}: {e}")
+        return False
+
+def load_transformed_macro_data(series_id: str, bucket_name: str = DEFAULT_BUCKET) -> Optional[pd.DataFrame]:
+    """
+    Load transformed macro data from GCS.
+
+    Args:
+        series_id: Macro series identifier
+        bucket_name: GCS bucket name
+
+    Returns:
+        DataFrame with transformed macro data or None if not found
+    """
+    try:
+        # Use the new naming convention: {series_id}_data.parquet
+        file_path = get_standard_path('processed_macros', f"{series_id}_data")
+        return load_from_gcs(bucket_name, file_path)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error loading transformed macro data for {series_id}: {e}")
+        return None
+
+def list_available_tickers(date_str: str = None, bucket_name: str = DEFAULT_BUCKET) -> List[str]:
+    """
+    List all available tickers.
+
+    Args:
+        date_str: Not used (kept for backward compatibility)
+        bucket_name: GCS bucket name
+
+    Returns:
+        List of available ticker symbols
+    """
+    try:
+        prefix = "raw/tickers/"
+        blob_names = list_blobs_with_prefix(bucket_name, prefix)
+
+        # Extract ticker symbols from file names
+        tickers = []
+        for blob_name in blob_names:
+            if blob_name.endswith('_data.parquet'):
+                # Extract ticker from filename like "raw/tickers/AAPL_data.parquet"
+                filename = blob_name.split('/')[-1]
+                ticker = filename.replace("_data.parquet", "")
+                tickers.append(ticker)
+
+        logger = get_database_logger(__name__)
+        logger.info(f"Found {len(tickers)} tickers")
+        return sorted(tickers)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error listing available tickers: {e}")
+        return []
+
+def list_available_macro_series(date_str: str = None, bucket_name: str = DEFAULT_BUCKET) -> List[str]:
+    """
+    List all available macro series.
+
+    Args:
+        date_str: Not used (kept for backward compatibility)
+        bucket_name: GCS bucket name
+
+    Returns:
+        List of available macro series IDs
+    """
+    try:
+        prefix = "raw/macros/"
+        blob_names = list_blobs_with_prefix(bucket_name, prefix)
+
+        # Extract series IDs from file names
+        series_ids = []
+        for blob_name in blob_names:
+            if blob_name.endswith('_data.parquet'):
+                # Extract series_id from filename like "raw/macros/FEDFUNDS_data.parquet"
+                filename = blob_name.split('/')[-1]
+                series_id = filename.replace("_data.parquet", "")
+                series_ids.append(series_id)
+
+        logger = get_database_logger(__name__)
+        logger.info(f"Found {len(series_ids)} macro series")
+        return sorted(series_ids)
+
+    except Exception as e:
+        logger = get_database_logger(__name__)
+        logger.error(f"Error listing available macro series: {e}")
+        return []

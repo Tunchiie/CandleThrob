@@ -1,0 +1,26 @@
+# ARM64-compatible optimization requirements
+-r core.txt
+
+# Plaid API integration
+plaid-python>=9.0.0
+
+# Machine learning for pattern recognition
+scikit-learn>=1.0.0
+joblib>=1.5.1
+
+# Financial calculations and portfolio optimization
+scipy>=1.7.0
+numpy-financial>=1.0.0
+
+# Advanced portfolio optimization (ARM64 compatible)
+cvxpy>=1.3.0  # Convex optimization
+PyPortfolioOpt>=1.5.0  # Modern Portfolio Theory
+
+# Options pricing (pure Python - ARM64 compatible)
+mibian>=0.1.3  # Black-Scholes models
+py_vollib>=1.0.1  # Volatility calculations
+
+# Visualization
+matplotlib>=3.7.0,<3.10.0
+seaborn>=0.12.0,<0.14.0
+plotly>=5.0.0

@@ -123,7 +123,7 @@ Each transformation flow includes these standardized tasks:
 
 ### **Development Testing:**
 ```bash
-# Manual execution in Kestra UI
+# Manual execution in Airflow UI
 Flow: transform_data_dev
 Namespace: candlethrob.transform
 Trigger: Manual execution

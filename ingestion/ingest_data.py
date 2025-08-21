@@ -21,7 +21,7 @@ Features:
 - Parallel processing capabilities
 - Comprehensive progress tracking and reporting
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 3.0.0
 Last Updated: 2025-07-14
 """
@@ -47,12 +47,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CandleThrob.ingestion.fetch_data import DataIngestion
-from CandleThrob.utils.models import TickerData, MacroData
-from CandleThrob.utils.oracle_conn import OracleDB
-from CandleThrob.utils.logging_config import (
+from CandleThrob.utils.gcs import save_ticker_data, load_ticker_data
+from CandleThrob.core.logging import (
     get_ingestion_logger, log_ingestion_start, log_ingestion_success, 
     log_ingestion_error, log_rate_limiting, log_batch_progress
 )
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
+from CandleThrob.core.config import get_config, ProcessingConfig, APIConfig
 
 # Get logger for this module
 logger = get_ingestion_logger(__name__)
@@ -100,39 +101,6 @@ class BatchConfig:
         if not 0.0 <= self.min_data_quality_score <= 1.0:
             raise ValueError("min_data_quality_score must be between 0.0 and 1.0")
 
-class PerformanceMonitor:
-    """Performance monitoring for ingestion operations."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    @contextmanager
-    def monitor_operation(self, operation_name: str):
-        """Context manager for operation monitoring."""
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        try:
-            yield
-            success = True
-            error_message = None
-        except Exception as e:
-            success = False
-            error_message = str(e)
-            raise
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-            
-            with self._lock:
-                self.metrics[operation_name] = {
-                    "duration": end_time - start_time,
-                    "memory_usage_mb": end_memory - start_memory,
-                    "success": success,
-                    "error_message": error_message,
-                    "timestamp": datetime.now().isoformat()
-                }
 
 class RateLimiter:
     """
@@ -324,11 +292,11 @@ class DataQualityValidator:
         quality_score = max(0.0, quality_score)
         return quality_score >= 0.8, quality_score, issues
 
-class CompleteDataIngestion:
+class IngestionOrchestrator:
     """
-    Complete data ingestion system for processing all tickers in batches.
+    Orchestrates the complete data ingestion pipeline for processing all tickers in batches.
 
-    This class provides data ingestion capabilities that processes
+    This orchestrator provides data ingestion capabilities that processes
     all S&P 500 and ETF tickers with stateful batch processing, advanced rate limiting,
     comprehensive error handling, and incremental data loading.
 
@@ -337,8 +305,7 @@ class CompleteDataIngestion:
         rate_limiter (RateLimiter): Advanced rate limiter for API calls
         performance_monitor (PerformanceMonitor): Performance monitor
         quality_validator (DataQualityValidator): Data quality validator
-        db (OracleDB): Database connection manager
-        engine: SQLAlchemy engine for bulk operations
+        gcs_bucket (str): Google Cloud Storage bucket name for data storage
     """
     
     def __init__(self, config: BatchConfig):
@@ -350,16 +317,15 @@ class CompleteDataIngestion:
 
         Example:
             >>> config = BatchConfig(batch_size=25, rate_limit_seconds=5)
-            >>> ingestion = CompleteDataIngestion(config)
+            >>> ingestion = IngestionOrchestrator(config)
         """
         self.config = config
         self.rate_limiter = RateLimiter()
         self.performance_monitor = PerformanceMonitor()
         self.quality_validator = DataQualityValidator()
-        self.db = OracleDB()
-        self.engine = self.db.get_sqlalchemy_engine()
+        self.gcs_bucket = os.getenv('GCS_BUCKET_NAME', 'candlethrob-wandata')
         
-        logger.info("CompleteDataIngestion initialized with configuration")
+        logger.info("IngestionOrchestrator initialized with configuration")
     
     @retry_on_failure(max_retries=3, delay_seconds=60)
     def update_ticker_data(self, ticker: str) -> bool:
@@ -380,7 +346,7 @@ class CompleteDataIngestion:
             Exception: If data processing fails after all retry attempts
             
         Example:
-            >>> ingestion = CompleteDataIngestion(config)
+            >>> ingestion = IngestionOrchestrator(config)
             >>> success = ingestion.update_ticker_data("AAPL")
         """
         operation_name = f"update_ticker_data_{ticker}"
@@ -392,30 +358,11 @@ class CompleteDataIngestion:
                 # Rate limiting
                 self.rate_limiter.wait_if_needed()
                 
-                with self.db.establish_connection() as conn:
-                    with conn.cursor() as cursor:
-                        TickerData().create_table(cursor)
-                    
-                    # Check existing data and get last date for incremental loading
-                    ticker_model = TickerData()
-                    try:
-                        with conn.cursor() as cursor:
-                            if ticker_model.data_exists(cursor, ticker):
-                                last_date = ticker_model.get_last_date(cursor, ticker)
-                                if last_date:
-                                    start = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
-                                    logger.info(f"Incremental update for {ticker}: fetching from {start}")
-                                else:
-                                    start = "2000-01-01"
-                                    logger.info(f"No valid date found for {ticker}, fetching from {start}")
-                            else:
-                                start = "2000-01-01"
-                                logger.info(f"No existing data for {ticker}, fetching from {start}")
-                    except Exception as e:
-                        logger.error(f"Error checking data existence: {e}")
-                        logger.error(f"Traceback: {traceback.format_exc()}")
-                        logger.info(f"Falling back to full data fetch from 2000-01-01")
-                        start = "2000-01-01"
+                # For GCS, we'll use a simple date range approach
+                # In a production system, you could check GCS for existing data
+                # and implement incremental loading based on file timestamps
+                start = "2000-01-01"  # Default start date for full data fetch
+                logger.info(f"Fetching data for {ticker} from {start} (full fetch mode)")
                 
                 end = datetime.now().strftime("%Y-%m-%d")
                 
@@ -440,10 +387,15 @@ class CompleteDataIngestion:
                     log_ingestion_error("ingest_data", ticker, f"Quality validation failed: {quality_issues}")
                     return False
                 
-                # Save to database using bulk operations
-                logger.info(f"Saving {len(ticker_df)} records for {ticker} (quality score: {quality_score:.2f})")
-                ticker_model.insert_data(self.engine, ticker_df)
-                log_ingestion_success("ingest_data", ticker, len(ticker_df))
+                # Save to GCS using parquet format
+                logger.info(f"Saving {len(ticker_df)} records for {ticker} to GCS (quality score: {quality_score:.2f})")
+                success = save_ticker_data(ticker_df, ticker, self.gcs_bucket)
+
+                if success:
+                    log_ingestion_success("ingest_data", ticker, len(ticker_df))
+                else:
+                    logger.error(f"Failed to save ticker data for {ticker} to GCS")
+                    return False
                 
                 return True
                 
@@ -479,7 +431,7 @@ class CompleteDataIngestion:
                 - performance_metrics (Dict): Performance metrics
                 
         Example:
-            >>> ingestion = CompleteDataIngestion(config)
+            >>> ingestion = IngestionOrchestrator(config)
             >>> results = ingestion.process_batch(["AAPL", "MSFT", "GOOGL"])
         """
         operation_name = f"process_batch_{len(tickers)}_tickers"
@@ -603,6 +555,48 @@ def get_etf_tickers() -> List[str]:
     ]
     return [clean_ticker(ticker) for ticker in etf_tickers]
 
+def get_already_processed_tickers() -> List[str]:
+    """
+    Check which tickers have already been processed today by looking at GCS and logs.
+    This enables resume functionality without changing the core algorithm.
+    
+    Returns:
+        List[str]: List of ticker symbols that have been processed today
+    """
+    processed_tickers = []
+    
+    try:
+        # First, check recent log files for successfully processed tickers
+        log_dir = '/app/logs'
+        today_str = datetime.now().strftime('%Y%m%d')
+        
+        if os.path.exists(log_dir):
+            for filename in os.listdir(log_dir):
+                if f'candlethrob_ingestion_{today_str}' in filename:
+                    try:
+                        with open(os.path.join(log_dir, filename), 'r') as f:
+                            content = f.read()
+                            # Look for successful processing messages
+                            import re
+                            pattern = r'\[ingest_data\] Successfully processed (\w+) - \d+ records'
+                            matches = re.findall(pattern, content)
+                            processed_tickers.extend(matches)
+                    except Exception:
+                        continue
+        
+        # Remove duplicates and clean up
+        processed_tickers = list(set(processed_tickers))
+        
+        logger.info(f"Found {len(processed_tickers)} already processed tickers from logs")
+        if processed_tickers:
+            logger.info(f"Already processed: {processed_tickers[:10]}...")
+            
+    except Exception as e:
+        logger.warning(f"Could not check processed tickers: {e}")
+        logger.info("Continuing with full processing...")
+    
+    return processed_tickers
+
 def main():
     """
     Main function for complete data ingestion processing all batches.
@@ -652,10 +646,19 @@ def main():
         sp500_tickers = get_sp500_tickers()
         etf_tickers = get_etf_tickers()
         all_tickers = sp500_tickers + etf_tickers
-        
+
         logger.info(f"Total tickers available: {len(all_tickers)}")
         logger.info(f"S&P 500 tickers: {len(sp500_tickers)}")
         logger.info(f"ETF tickers: {len(etf_tickers)}")
+        
+        # Check for already processed tickers (resume functionality)
+        already_processed = get_already_processed_tickers()
+        if already_processed:
+            # Filter out already processed tickers
+            remaining_tickers = [t for t in all_tickers if t not in already_processed]
+            logger.info(f"Resume mode: Found {len(already_processed)} already processed tickers")
+            logger.info(f"Remaining tickers to process: {len(remaining_tickers)}")
+            all_tickers = remaining_tickers
         
         # Calculate total batches
         total_batches = (len(all_tickers) + batch_size - 1) // batch_size
@@ -663,7 +666,7 @@ def main():
         logger.info(f"Processing {total_batches} batches of {batch_size} tickers each")
         
         # Process all batches
-        ingestion = CompleteDataIngestion(config)
+        ingestion = IngestionOrchestrator(config)
         start_time = datetime.now()
         overall_results = {
             "total_batches": total_batches,
@@ -718,17 +721,22 @@ def main():
         if overall_results['failed_tickers'] > 0:
             logger.warning(f"Failed tickers: {overall_results['failed_tickers_list']}")
         
-        # Signal completion
+        # Signal completion (use working directory)
+        data_dir = os.getcwd() + "/data"
+        os.makedirs(data_dir, exist_ok=True)
+        logger.info(f"Using data directory: {data_dir}")
+
         try:
-            with open("/app/data/batch_cycle_complete.flag", "w") as f:
+            os.makedirs(data_dir, exist_ok=True)
+            completion_flag = os.path.join(data_dir, "batch_cycle_complete.flag")
+            with open(completion_flag, "w") as f:
                 f.write(datetime.now().isoformat())
-            logger.info("Batch cycle complete flag written.")
+            logger.info(f"Batch cycle complete flag written to: {completion_flag}")
         except Exception as e:
             logger.error(f"Failed to write batch cycle complete flag: {e}")
-        
+
         # Save comprehensive results to file for monitoring
-        results_file = f"/app/data/ingestion_results.json"
-        os.makedirs(os.path.dirname(results_file), exist_ok=True)
+        results_file = os.path.join(data_dir, "ingestion_results.json")
         
         with open(results_file, 'w') as f:
             json.dump(overall_results, f, indent=2, default=str)
@@ -740,8 +748,6 @@ def main():
         logger.error(f"Traceback: {traceback.format_exc()}")
         sys.exit(1)
 
-# Backward compatibility aliases
-# BatchConfig and CompleteDataIngestion are now the main classes
 
 if __name__ == "__main__":
     main() 

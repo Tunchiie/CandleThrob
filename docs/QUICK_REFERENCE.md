@@ -36,12 +36,12 @@ docker build -t candlethrob:latest .
 | **Development** | `candlethrob:dev` | Embedded | `docker-compose.override.yml` |
 | **Production** | `candlethrob:latest` | Mounted | `docker-compose.yml` |
 
-## 🎯 Kestra Flows
+## 🎯 Apache Airflow DAGs
 
-| Flow | Image | Purpose |
-|------|-------|---------|
-| `ingest_data_optimized.yml` | `candlethrob:dev` | Development testing |
-| `ingest_data_production.yml` | `candlethrob:latest` | Production deployment |
+| DAG | Image | Purpose |
+|-----|-------|---------|
+| `candlethrob_ingestion_dev` | `candlethrob:dev` | Development testing |
+| `candlethrob_ingestion_prod` | `candlethrob:latest` | Production deployment |
 
 ## 🔐 Security
 
@@ -61,14 +61,15 @@ docker build -t candlethrob:latest .
 # Check if CandleThrob module loads
 docker compose exec candlethrob python -c "import CandleThrob; print('✅ OK')"
 
-# Test database connection
-docker compose exec candlethrob python -c "from CandleThrob.utils.oracle_conn import OracleDB; OracleDB(); print('✅ DB OK')"
+# Test GCS connection
+docker compose exec candlethrob python -c "from CandleThrob.utils.gcs import test_gcs_connection; print('✅ GCS OK' if test_gcs_connection('candlethrob-candata') else '❌ GCS Failed')"
 
-# Check wallet files
-ls -la Wallet_candleThroblake/
+# Check GCS credentials
+ls -la ./gcs/
 
-# View Kestra logs
-docker compose logs kestra
+# View Airflow logs
+docker compose logs airflow-webserver
+docker compose logs airflow-scheduler
 
 # Restart services
 docker compose restart
@@ -76,7 +77,7 @@ docker compose restart
 
 ## 📍 URLs
 
-- **Kestra UI**: http://localhost:8080
+- **Airflow UI**: http://localhost:8080
 - **Logs**: `./logs/`
 - **Data**: `./data/`
 

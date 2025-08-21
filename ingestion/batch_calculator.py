@@ -43,11 +43,25 @@ from contextlib import contextmanager
 # Add the parent directory to the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from CandleThrob.ingestion.ingest_data import get_sp500_tickers, get_etf_tickers
-from CandleThrob.utils.logging_config import (
-    get_ingestion_logger, log_batch_calculation_start, log_batch_calculation_success, 
-    log_batch_calculation_error, AdvancedTransformLogger
-)
+from CandleThrob.core.logging import get_ingestion_logger
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
+
+# For ticker fetching, use local functions since ingestion module might have circular imports
+import pandas as pd
+import re
+
+def get_sp500_tickers() -> List[str]:
+    """Fetch S&P 500 ticker symbols from Wikipedia."""
+    try:
+        tickers = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]["Symbol"].tolist()
+        return [re.sub(r"[^A-Z0-9\-]", "-", ticker.strip().upper()).strip("-") for ticker in tickers]
+    except Exception:
+        return []
+
+def get_etf_tickers() -> List[str]:
+    """Get list of major ETF ticker symbols."""
+    etf_tickers = ['SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'TLT', 'GLD', 'XLF', 'XLE', 'XLK', 'XLV', 'ARKK', 'VXX', 'TQQQ', 'SQQQ', 'SOXL', 'XLI', 'XLY', 'XLP', 'SLV']
+    return [re.sub(r"[^A-Z0-9\-]", "-", ticker.strip().upper()).strip("-") for ticker in etf_tickers]
 
 # Get logger for this module
 logger = get_ingestion_logger(__name__)
@@ -324,7 +338,7 @@ class BatchCalculator:
                     "calculation_timestamp": datetime.now().isoformat()
                 }
                 
-                # Save batch schedule to file for Kestra to use
+                # Save batch schedule to file for workflow orchestrator to use
                 schedule_file = "/app/data/_batch_schedule.json"
                 os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
                 

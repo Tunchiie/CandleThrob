@@ -89,7 +89,7 @@ Examples:
     parser.add_argument(
         'command',
         nargs='?',
-        default='ingest',
+        default='help',
         choices=['ingest', 'transform', 'validate', 'macro', 'help'],
         help='Command to run (default: ingest)'
     )

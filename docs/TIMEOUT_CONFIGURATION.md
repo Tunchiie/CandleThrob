@@ -1,8 +1,8 @@
-# ⏰ Kestra Timeout Configuration Guide
+# ⏰ Apache Airflow Timeout Configuration Guide
 
 ## 🎯 **OVERVIEW**
 
-Kestra tasks have configurable timeout limits to prevent runaway processes. This guide explains timeout configuration and troubleshooting for CandleThrob flows.
+Apache Airflow tasks have configurable timeout limits to prevent runaway processes. This guide explains timeout configuration and troubleshooting for CandleThrob workflows.
 
 ## ⚠️ **COMMON TIMEOUT ERROR**
 
@@ -35,21 +35,23 @@ This indicates a task exceeded its 1-minute timeout limit.
 
 ## 🔧 **TIMEOUT FORMAT**
 
-Kestra uses ISO 8601 duration format:
+Apache Airflow uses timedelta objects for timeout configuration:
 
-```yaml
-timeout: PT2H30M15S  # 2 hours, 30 minutes, 15 seconds
-timeout: PT4H        # 4 hours
-timeout: PT30M       # 30 minutes
-timeout: PT5M        # 5 minutes
-timeout: PT2M        # 2 minutes
+```python
+from datetime import timedelta
+
+timeout=timedelta(hours=2, minutes=30, seconds=15)  # 2 hours, 30 minutes, 15 seconds
+timeout=timedelta(hours=4)                          # 4 hours
+timeout=timedelta(minutes=30)                       # 30 minutes
+timeout=timedelta(minutes=5)                        # 5 minutes
+timeout=timedelta(minutes=2)                        # 2 minutes
 ```
 
 ## 🚨 **TROUBLESHOOTING TIMEOUTS**
 
 ### **1. Identify the Timing Out Task**
 
-Check Kestra UI execution logs:
+Check Airflow UI execution logs:
 1. Go to Executions tab
 2. Click on failed execution
 3. Look for the task with timeout error
@@ -202,7 +204,7 @@ timeout: PT15M  # Reduced timeout with caching
 
 Your timeout has been increased from PT1M to PT5M for status check tasks. If you continue to see timeouts:
 
-1. **Check which specific task is timing out** in Kestra UI
+1. **Check which specific task is timing out** in Airflow UI
 2. **Review task logs** for performance bottlenecks
 3. **Increase timeout** for the specific failing task
 4. **Consider optimization** if timeouts persist

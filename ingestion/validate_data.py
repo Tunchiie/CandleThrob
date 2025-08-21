@@ -20,7 +20,7 @@ Features:
 - Parallel processing capabilities
 - Advanced error categorization and handling
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 3.0.0
 Last Updated: 2025-07-14
 """
@@ -39,14 +39,12 @@ from functools import wraps
 from contextlib import contextmanager
 import pandas as pd
 import numpy as np
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CandleThrob.utils.models import TickerData, MacroData
 from CandleThrob.utils.oracle_conn import OracleDB
-from CandleThrob.utils.logging_config import (
-    get_ingestion_logger, log_validation_start, log_validation_success, 
-    log_validation_error, AdvancedTransformLogger
-)
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Get logger for this module
 logger = get_ingestion_logger(__name__)
@@ -92,39 +90,6 @@ class ValidationConfig:
         if not 0.0 <= self.max_null_ratio <= 1.0:
             raise ValueError("max_null_ratio must be between 0.0 and 1.0")
 
-class PerformanceMonitor:
-    """performance monitoring for validation operations."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    @contextmanager
-    def monitor_operation(self, operation_name: str):
-        """Context manager for operation monitoring."""
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        try:
-            yield
-            success = True
-            error_message = None
-        except Exception as e:
-            success = False
-            error_message = str(e)
-            raise
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-            
-            with self._lock:
-                self.metrics[operation_name] = {
-                    "duration": end_time - start_time,
-                    "memory_usage_mb": end_memory - start_memory,
-                    "success": success,
-                    "error_message": error_message,
-                    "timestamp": datetime.now().isoformat()
-                }
 
 def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
     """retry decorator with exponential backoff."""
@@ -273,7 +238,7 @@ class DataValidator:
             >>> validator = DataValidator(ValidationConfig())
         """
         self.config = config or ValidationConfig()
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor("default")
         self.quality_scorer = DataQualityScorer()
         self.db = OracleDB()
         

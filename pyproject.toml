@@ -7,7 +7,7 @@ name = "candlethrob"
 version = "1.0.0"
 description = "Advanced financial data pipeline for stock market analysis"
 authors = [
-    {name = "CandleThrob Team", email = "team@candlethrob.com"}
+    {name = "Adetunji Fasiku", email = "team@candlethrob.com"}
 ]
 readme = "README.md"
 license = {text = "MIT"}

@@ -340,22 +340,29 @@ def update_ticker_data(self, ticker: str) -> bool:
 
 ## Integration
 
-### Kestra Workflow
-```yaml
-- id: process_all_batches
-  type: io.kestra.plugin.docker.Run
-  containerImage: candlethrob:latest
-  command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"]
-  env:
-    BATCH_SIZE: "25"
-    POLYGON_RATE_LIMIT: "12"
-    MAX_RETRIES: "3"
-    PARALLEL_PROCESSING: "true"
-    ENABLE_PERFORMANCE_MONITORING: "true"
-  volumes:
-    - "/tmp/kestra-wd:/app"
-    - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
-  timeout: PT4H
+### Apache Airflow Integration
+```python
+from airflow import DAG
+from airflow.providers.docker.operators.docker import DockerOperator
+from datetime import datetime, timedelta
+
+process_all_batches = DockerOperator(
+    task_id='process_all_batches',
+    image='candlethrob:latest',
+    command='sh -c "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"',
+    environment={
+        'BATCH_SIZE': '25',
+        'POLYGON_RATE_LIMIT': '12',
+        'MAX_RETRIES': '3',
+        'PARALLEL_PROCESSING': 'true',
+        'ENABLE_PERFORMANCE_MONITORING': 'true'
+    },
+    volumes=[
+        '/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro'
+    ],
+    timeout=timedelta(hours=4),
+    dag=dag,
+)
 ```
 
 ### Database Integration

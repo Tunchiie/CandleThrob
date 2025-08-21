@@ -43,7 +43,7 @@ from CandleThrob.ingestion.fetch_data import DataIngestion
 from CandleThrob.ingestion.enrich_data import TechnicalIndicators
 from CandleThrob.utils.oracle_conn import OracleDB
 from CandleThrob.utils.models import TickerData, MacroData, TransformedTickerData, TransformedMacroData
-from CandleThrob.utils.logging_config import get_database_logger, performance_monitor
+from CandleThrob.core.logging import get_ingestion_logger, get_transform_logger, log_ingestion_start, log_ingestion_success, log_ingestion_error, log_rate_limiting, log_batch_progress
 
 # Test configuration constants
 DEFAULT_TEST_TIMEOUT = 300  # 5 minutes
@@ -124,7 +124,7 @@ class TestPerformanceMonitor:
             }
 
 # Global performance monitor
-_performance_monitor = TestPerformanceMonitor()
+_performance_monitor = TestPerformanceMonitor("default")
 
 @pytest.fixture(scope="session")
 def test_config() -> TestConfig:
@@ -595,210 +595,8 @@ def data_quality_validator():
     Returns:
         DataQualityValidator: Instance for comprehensive data quality validation
     """
-    class DataQualityValidator:
-        """Comprehensive data quality validation for financial data with detailed reporting."""
-        
-        def validate_ohlcv_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-            """
-            Validate OHLCV data quality with comprehensive checks.
-            
-            Args:
-                df: DataFrame with OHLCV data
-                
-            Returns:
-                Dict: Comprehensive validation results
-            """
-            results = {
-                "is_valid": True,
-                "errors": [],
-                "warnings": [],
-                "statistics": {},
-                "quality_score": 0.0,
-                "recommendations": []
-            }
-            
-            required_columns = ["Open", "High", "Low", "Close", "Volume"]
-            
-            # Check required columns
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                results["is_valid"] = False
-                results["errors"].append(f"Missing required columns: {missing_columns}")
-            
-            # Check data types
-            for col in required_columns:
-                if col in df.columns:
-                    if not pd.api.types.is_numeric_dtype(df[col]):
-                        results["errors"].append(f"Column {col} is not numeric")
-                        results["is_valid"] = False
-            
-            # Check OHLC relationships with tolerance
-            if all(col in df.columns for col in ["Open", "High", "Low", "Close"]):
-                try:
-                    # Convert to numeric to handle data type issues
-                    df["High"] = pd.to_numeric(df["High"], errors='coerce')
-                    df["Low"] = pd.to_numeric(df["Low"], errors='coerce')
-                    df["Open"] = pd.to_numeric(df["Open"], errors='coerce')
-                    df["Close"] = pd.to_numeric(df["Close"], errors='coerce')
+    # DataQualityValidator is now imported from core.validators
 
-                    # Add tolerance for floating-point precision (0.1%)
-                    tolerance = 0.001
-
-                    invalid_ohlc = (
-                        (df["High"] < (df["Low"] * (1 - tolerance))) |
-                        (df["High"] < (df["Open"] * (1 - tolerance))) |
-                        (df["High"] < (df["Close"] * (1 - tolerance))) |
-                        (df["Low"] > (df["Open"] * (1 + tolerance))) |
-                        (df["Low"] > (df["Close"] * (1 + tolerance)))
-                    )
-
-                    invalid_count = invalid_ohlc.sum()
-                    if invalid_count > 0:
-                        invalid_ratio = invalid_count / len(df)
-                        if invalid_ratio > 0.05:  # More than 5% invalid
-                            results["errors"].append(f"Critical OHLC validation failure: {invalid_count} invalid relationships ({invalid_ratio:.2%})")
-                            results["is_valid"] = False
-                            results["quality_score"] -= 0.5
-                        else:
-                            # Minor issues - just warning
-                            results["warnings"].append(f"Minor OHLC inconsistencies: {invalid_count} relationships ({invalid_ratio:.2%})")
-                            results["quality_score"] -= 0.1 * invalid_ratio
-
-                except Exception as e:
-                    results["warnings"].append(f"OHLC validation failed due to data type issues: {e}")
-            
-            # Check for negative values
-            for col in ["Open", "High", "Low", "Close", "Volume"]:
-                if col in df.columns:
-                    negative_count = (df[col] < 0).sum()
-                    if negative_count > 0:
-                        results["warnings"].append(f"Found {negative_count} negative values in {col}")
-                        results["quality_score"] -= 0.05 * (negative_count / len(df))
-            
-            # Check for extreme outliers
-            for col in ["Open", "High", "Low", "Close"]:
-                if col in df.columns:
-                    Q1 = df[col].quantile(0.25)
-                    Q3 = df[col].quantile(0.75)
-                    IQR = Q3 - Q1
-                    outliers = ((df[col] < (Q1 - 1.5 * IQR)) | (df[col] > (Q3 + 1.5 * IQR))).sum()
-                    if outliers > 0:
-                        results["warnings"].append(f"Found {outliers} outliers in {col}")
-                        results["quality_score"] -= 0.05 * (outliers / len(df))
-            
-            # Check for missing values
-            missing_counts = df[required_columns].isnull().sum()
-            if missing_counts.any():
-                results["warnings"].append(f"Missing values found: {missing_counts.to_dict()}")
-                results["quality_score"] -= 0.1 * (missing_counts.sum() / (len(df) * len(required_columns)))
-            
-            # Calculate comprehensive statistics
-            if not df.empty:
-                results["statistics"] = {
-                    "row_count": len(df),
-                    "missing_values": df[required_columns].isnull().sum().to_dict(),
-                    "price_range": {
-                        "min": df[["Open", "High", "Low", "Close"]].min().min(),
-                        "max": df[["Open", "High", "Low", "Close"]].max().max()
-                    },
-                    "volume_statistics": {
-                        "mean": df["Volume"].mean(),
-                        "std": df["Volume"].std(),
-                        "min": df["Volume"].min(),
-                        "max": df["Volume"].max()
-                    },
-                    "price_volatility": df[["Open", "High", "Low", "Close"]].std().mean()
-                }
-            
-            # Calculate quality score
-            results["quality_score"] = max(0.0, 1.0 + results["quality_score"])
-            
-            # Generate recommendations
-            if results["quality_score"] < 0.8:
-                results["recommendations"].append("Data quality is below threshold - review required")
-            if len(results["warnings"]) > 5:
-                results["recommendations"].append("High number of warnings - data review recommended")
-            
-            return results
-        
-        def validate_macro_data(self, df: pd.DataFrame) -> Dict[str, Any]:
-            """
-            Validate macroeconomic data quality with comprehensive checks.
-            
-            Args:
-                df: DataFrame with macro data
-                
-            Returns:
-                Dict: Comprehensive validation results
-            """
-            results = {
-                "is_valid": True,
-                "errors": [],
-                "warnings": [],
-                "statistics": {},
-                "quality_score": 0.0,
-                "recommendations": []
-            }
-            
-            required_columns = ["date", "series_id", "value"]
-            
-            # Check required columns
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                results["is_valid"] = False
-                results["errors"].append(f"Missing required columns: {missing_columns}")
-            
-            # Check data types
-            if "date" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["date"]):
-                results["errors"].append("Date column is not datetime type")
-                results["is_valid"] = False
-            
-            if "value" in df.columns and not pd.api.types.is_numeric_dtype(df["value"]):
-                results["errors"].append("Value column is not numeric")
-                results["is_valid"] = False
-            
-            # Check for missing values
-            if not df.empty:
-                missing_counts = df.isnull().sum()
-                if missing_counts.any():
-                    results["warnings"].append(f"Missing values found: {missing_counts.to_dict()}")
-                    results["quality_score"] -= 0.1 * (missing_counts.sum() / (len(df) * len(df.columns)))
-            
-            # Check for extreme outliers
-            if "value" in df.columns:
-                Q1 = df["value"].quantile(0.25)
-                Q3 = df["value"].quantile(0.75)
-                IQR = Q3 - Q1
-                outliers = ((df["value"] < (Q1 - 1.5 * IQR)) | (df["value"] > (Q3 + 1.5 * IQR))).sum()
-                if outliers > 0:
-                    results["warnings"].append(f"Found {outliers} outliers in values")
-                    results["quality_score"] -= 0.05 * (outliers / len(df))
-            
-            # Calculate comprehensive statistics
-            if not df.empty:
-                results["statistics"] = {
-                    "row_count": len(df),
-                    "unique_series": df["series_id"].nunique() if "series_id" in df.columns else 0,
-                    "date_range": {
-                        "start": df["date"].min() if "date" in df.columns else None,
-                        "end": df["date"].max() if "date" in df.columns else None
-                    },
-                    "value_statistics": {
-                        "mean": df["value"].mean() if "value" in df.columns else None,
-                        "std": df["value"].std() if "value" in df.columns else None,
-                        "min": df["value"].min() if "value" in df.columns else None,
-                        "max": df["value"].max() if "value" in df.columns else None
-                    }
-                }
-            
-            # Calculate quality score
-            results["quality_score"] = max(0.0, 1.0 + results["quality_score"])
-            
-            return results
-    
-    return DataQualityValidator()
-
-@pytest.fixture(scope="function")
 def statistical_validator():
     """
     Advanced statistical validation fixture for comprehensive financial data analysis.

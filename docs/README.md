@@ -28,14 +28,13 @@ CandleThrob processes S&P 500 and ETF data with advanced features including incr
 
 ## Quick Start
 
-### 1. Database Setup
+### 1. GCS Setup
 ```python
-from CandleThrob.utils.oracle_conn import OracleDB
+from CandleThrob.utils.gcs import test_gcs_connection
 
-# Test database connection
-db = OracleDB()
-with db.establish_connection() as conn:
-    print("Database connection successful!")
+# Test GCS connection
+result = test_gcs_connection('candlethrob-candata')
+print("GCS connection successful!" if result else "GCS connection failed!")
 ```
 
 ### 2. Data Ingestion
@@ -166,21 +165,41 @@ POLYGON_RATE_LIMIT=12
 
 ## Integration
 
-### Kestra Workflow
-```yaml
-- id: process_all_batches
-  type: io.kestra.plugin.docker.Run
-  containerImage: candlethrob:latest
-  command: ["sh", "-c", "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"]
-  env:
-    BATCH_SIZE: "25"
-    POLYGON_RATE_LIMIT: "12"
-    TNS_ADMIN: "/opt/oracle/instantclient_23_8/network/admin"
-    ORA_PYTHON_DRIVER_TYPE: "thick"
-  volumes:
-    - "/tmp/kestra-wd:/app"
-    - "/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro"
-  timeout: PT4H
+### Apache Airflow Integration
+```python
+from airflow import DAG
+from airflow.providers.docker.operators.docker import DockerOperator
+from datetime import datetime, timedelta
+
+dag = DAG(
+    'candlethrob_ingestion',
+    default_args={
+        'owner': 'data-team',
+        'retries': 3,
+        'retry_delay': timedelta(minutes=5),
+    },
+    description='CandleThrob data ingestion pipeline',
+    schedule_interval='0 6 * * 1-5',  # 6 AM weekdays
+    start_date=datetime(2025, 1, 1),
+    catchup=False,
+)
+
+process_all_batches = DockerOperator(
+    task_id='process_all_batches',
+    image='candlethrob:latest',
+    command='sh -c "cd /app && PYTHONPATH=/app python3 /app/CandleThrob/ingestion/ingest_data.py"',
+    environment={
+        'BATCH_SIZE': '25',
+        'POLYGON_RATE_LIMIT': '12',
+        'TNS_ADMIN': '/opt/oracle/instantclient_23_8/network/admin',
+        'ORA_PYTHON_DRIVER_TYPE': 'thick'
+    },
+    volumes=[
+        '/home/ubuntu/stockbot/Wallet_candleThroblake:/opt/oracle/instantclient_23_8/network/admin:ro'
+    ],
+    timeout=timedelta(hours=4),
+    dag=dag,
+)
 ```
 
 ## Dependencies

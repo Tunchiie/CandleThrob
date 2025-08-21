@@ -21,11 +21,12 @@ Features:
 - Resource management and optimization
 - Advanced error categorization and handling
 
-Author: CandleThrob Team
+Author: Adetunji Fasiku
 Version: 3.0.0
 Last Updated: 2025-07-14
 """
 
+import os
 import time
 import re
 import pandas as pd
@@ -36,7 +37,7 @@ from fredapi import Fred
 from datetime import datetime, timedelta
 from tqdm import tqdm
 from typing import Optional, List, Dict, Any, Union, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from functools import wraps
 import hashlib
 import json
@@ -45,10 +46,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 
 from CandleThrob.utils.vault import get_secret
-from CandleThrob.utils.logging_config import (
+from CandleThrob.core.logging import (
     get_ingestion_logger, log_ingestion_start, log_ingestion_success, 
     log_ingestion_error, log_rate_limiting
 )
+from CandleThrob.core.monitors import UniversalPerformanceMonitor as PerformanceMonitor
 from polygon import RESTClient
 
 # Get logger for this module
@@ -79,6 +81,11 @@ class IngestionConfig:
     enable_audit_trail: bool = True
     enable_metrics_aggregation: bool = True
     enable_memory_optimization: bool = True
+
+    # Data processing options
+    enable_forward_fill: bool = True  # Forward fill missing values
+    enable_backward_fill: bool = True  # Backward fill missing values
+    enable_interpolation: bool = True  # Use interpolation for remaining gaps
     
     def __post_init__(self):
         """Validate configuration parameters."""
@@ -120,7 +127,53 @@ class RateLimiter:
 
 class DataQualityValidator:
     """Data quality validation."""
-    
+
+    def validate_macro_data(self, df: pd.DataFrame) -> Tuple[bool, float, List[str]]:
+        """Validate macro data quality."""
+        issues = []
+        quality_score = 1.0
+
+        if df.empty:
+            issues.append("DataFrame is empty")
+            quality_score = 0.0
+            return False, quality_score, issues
+
+        # Check required columns for macro data
+        required_cols = ['date', 'series_id', 'value', 'units', 'title']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            issues.append(f"Missing required columns: {missing_cols}")
+            quality_score -= 0.3
+
+        # Check for null values
+        null_ratio = df.isnull().sum().sum() / (len(df) * len(df.columns))
+        if null_ratio > 0.1:
+            issues.append(f"High null ratio: {null_ratio:.2%}")
+            quality_score -= 0.2
+
+        # Check for valid numeric values
+        if 'value' in df.columns:
+            try:
+                df['value'] = pd.to_numeric(df['value'], errors='coerce')
+                nan_count = df['value'].isna().sum()
+                if nan_count > 0:
+                    issues.append(f"Non-numeric values in 'value' column: {nan_count}")
+                    quality_score -= 0.1
+            except Exception:
+                issues.append("Error validating numeric values")
+                quality_score -= 0.2
+
+        # Check date format
+        if 'date' in df.columns:
+            try:
+                pd.to_datetime(df['date'])
+            except Exception:
+                issues.append("Invalid date format")
+                quality_score -= 0.2
+
+        quality_score = max(0.0, quality_score)
+        return quality_score >= 0.7, quality_score, issues
+
     def validate_ohlcv_data(self, df: pd.DataFrame) -> Tuple[bool, float, List[str], pd.DataFrame]:
         """Validate OHLCV data quality."""
         issues = []
@@ -242,39 +295,6 @@ class DataQualityValidator:
 
         return df_clean
 
-class PerformanceMonitor:
-    """Performance monitoring."""
-    
-    def __init__(self):
-        self.metrics: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-    
-    @contextmanager
-    def monitor_operation(self, operation_name: str):
-        """Context manager for operation monitoring."""
-        start_time = time.time()
-        start_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        try:
-            yield
-            success = True
-            error_message = None
-        except Exception as e:
-            success = False
-            error_message = str(e)
-            raise
-        finally:
-            end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-            
-            with self._lock:
-                self.metrics[operation_name] = {
-                    "duration": end_time - start_time,
-                    "memory_usage_mb": end_memory - start_memory,
-                    "success": success,
-                    "error_message": error_message,
-                    "timestamp": datetime.now().isoformat()
-                }
 
 def retry_on_failure(max_retries: int = 3, delay_seconds: float = 1.0):
     """Retry decorator with exponential backoff."""
@@ -319,7 +339,7 @@ class DataIngestion:
         performance_monitor (PerformanceMonitor): Performance monitor
     """
     
-    def __init__(self, start_date: Optional[str] = None, end_date: Optional[str] = None,
+    def __init__(self, start_date: Optional[str] = None, end_date: Optional[str] = None,\
                  config: Optional[IngestionConfig] = None):
         """
         Initialize the DataIngestion class with advanced features.
@@ -347,7 +367,7 @@ class DataIngestion:
         self.config = config or IngestionConfig()
         self.rate_limiter = RateLimiter(self.config)
         self.quality_validator = DataQualityValidator()
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor("data_ingestion")
         
         if self.start_date > self.end_date:
             raise ValueError("Start date cannot be after end date. Please check the dates provided.")
@@ -399,7 +419,6 @@ class DataIngestion:
                 - low: Lowest price
                 - close: Closing price
                 - volume: Trading volume
-                - vwap: Volume-weighted average price
                 - transactions: Number of transactions
                 - ticker: Ticker symbol
                 - trade_date: Formatted date
@@ -475,6 +494,13 @@ class DataIngestion:
                 # Create yfinance ticker object
                 yf_ticker = yf.Ticker(ticker)
 
+                # Fetch marketcap from info
+                try:
+                    marketcap = yf_ticker.info.get('marketCap', None)
+                except Exception as e:
+                    logger.warning(f"Could not fetch marketcap for {ticker}: {e}")
+                    marketcap = None
+
                 # Fetch historical data
                 hist_data = yf_ticker.history(
                     start=from_date,
@@ -512,10 +538,10 @@ class DataIngestion:
                         'low': float(row['Low']),
                         'close': float(row['Close']),
                         'volume': int(row['Volume']),
-                        'vwap': float((row['High'] + row['Low'] + row['Close']) / 3),  # Approximate VWAP
                         'transactions': 1,  # yfinance doesn't provide transaction count
                         'ticker': ticker,
-                        'trade_date': trade_datetime
+                        'trade_date': trade_datetime,
+                        'marketcap': marketcap
                     })
 
                 logger.info(f"yfinance data range for {ticker}: {earliest_date} to {latest_date}")
@@ -661,10 +687,10 @@ class DataIngestion:
                     'low': trade.low,
                     'close': trade.close,
                     'volume': trade.volume,
-                    'vwap': trade.vwap,
                     'transactions': trade.transactions,
                     'ticker': ticker,
-                    'trade_date': trade_datetime  # Store as datetime object, not string
+                    'trade_date': trade_datetime,  # Store as datetime object, not string
+                    'marketcap': None  # Will be filled by _add_polygon_marketcap
                 })
 
             logger.info(f"Data range for {ticker}: {earliest_date} to {latest_date}")
@@ -690,13 +716,82 @@ class DataIngestion:
                 
                 # Sort by timestamp
                 df = df.sort_values('timestamp').reset_index(drop=True)
-            
+
+                # Add market cap data from Polygon.io
+                df = self._add_polygon_marketcap(df, ticker)
+
             return df
             
         except Exception as e:
             logger.error(f"Error fetching Polygon.io data for {ticker}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
+
+    def _add_polygon_marketcap(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """
+        Add market cap data to DataFrame using Polygon.io ticker details API.
+
+        Args:
+            df (pd.DataFrame): DataFrame with price data
+            ticker (str): Ticker symbol
+
+        Returns:
+            pd.DataFrame: DataFrame with market cap added
+        """
+        if df.empty:
+            return df
+
+        try:
+            # Rate limiting for additional API call
+            self.rate_limiter.wait_if_needed()
+
+            # Get ticker details from Polygon.io
+            api_key = get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaca7fcwmhm3y6pjqoe5arj47tcvpvidiniodv2p7d2xcq")
+            if not api_key:
+                logger.warning("Polygon.io API key not found, skipping market cap fetch")
+                return df
+
+            from polygon import RESTClient
+            client = RESTClient(api_key)
+
+            # Get ticker details (includes market cap)
+            try:
+                ticker_details = client.get_ticker_details(ticker)
+
+                if ticker_details and hasattr(ticker_details, 'market_cap'):
+                    marketcap = ticker_details.market_cap
+                    df['marketcap'] = marketcap
+                    logger.info(f"Added Polygon.io market cap {marketcap:,} to {len(df)} records for {ticker}")
+                else:
+                    # Fallback: calculate from shares outstanding and latest close price
+                    if hasattr(ticker_details, 'share_class_shares_outstanding') and not df.empty:
+                        shares_outstanding = ticker_details.share_class_shares_outstanding
+                        latest_close = df['close'].iloc[-1]  # Use latest close price
+                        calculated_marketcap = shares_outstanding * latest_close
+                        df['marketcap'] = calculated_marketcap
+                        logger.info(f"Calculated market cap {calculated_marketcap:,} for {ticker} (shares: {shares_outstanding:,}, price: ${latest_close:.2f})")
+                    else:
+                        logger.warning(f"No market cap data available from Polygon.io for {ticker}")
+                        df['marketcap'] = None
+
+            except Exception as e:
+                logger.warning(f"Error fetching Polygon.io ticker details for {ticker}: {e}")
+                # Fallback to yfinance market cap
+                try:
+                    import yfinance as yf
+                    yf_ticker = yf.Ticker(ticker)
+                    marketcap = yf_ticker.info.get('marketCap', None)
+                    df['marketcap'] = marketcap
+                    logger.info(f"Fallback: Added yfinance market cap {marketcap} for {ticker}")
+                except Exception as yf_error:
+                    logger.warning(f"Fallback yfinance market cap also failed for {ticker}: {yf_error}")
+                    df['marketcap'] = None
+
+        except Exception as e:
+            logger.error(f"Error adding market cap data for {ticker}: {e}")
+            df['marketcap'] = None
+
+        return df
 
     def _fetch_hybrid_data(self, ticker: str) -> pd.DataFrame:
         """
@@ -761,6 +856,57 @@ class DataIngestion:
                 if not all_data:
                     logger.warning(f"No data retrieved from any source for {ticker}")
                     return pd.DataFrame()
+
+                # Ensure all DataFrames have the same columns before concatenation
+                # Get the most complete column set (usually from yfinance data)
+                all_columns = set()
+                for df in all_data:
+                    all_columns.update(df.columns)
+
+                # Add missing columns to each DataFrame
+                for i, df in enumerate(all_data):
+                    for col in all_columns:
+                        if col not in df.columns:
+                            if col == 'marketcap':
+                                # For marketcap, prioritize Polygon.io, fallback to yfinance
+                                marketcap_value = None
+
+                                # Try Polygon.io first (more accurate and timely)
+                                try:
+                                    api_key = get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaca7fcwmhm3y6pjqoe5arj47tcvpvidiniodv2p7d2xcq")
+                                    if api_key:
+                                        from polygon import RESTClient
+                                        client = RESTClient(api_key)
+                                        ticker_details = client.get_ticker_details(ticker)
+
+                                        if ticker_details and hasattr(ticker_details, 'market_cap'):
+                                            marketcap_value = ticker_details.market_cap
+                                            logger.info(f"Added Polygon.io marketcap {marketcap_value:,} to {len(df)} records for {ticker}")
+                                        elif hasattr(ticker_details, 'share_class_shares_outstanding') and not df.empty:
+                                            # Calculate from shares outstanding and latest close
+                                            shares = ticker_details.share_class_shares_outstanding
+                                            latest_close = df['close'].iloc[-1] if 'close' in df.columns else None
+                                            if latest_close:
+                                                marketcap_value = shares * latest_close
+                                                logger.info(f"Calculated Polygon.io marketcap {marketcap_value:,} for {ticker}")
+                                except Exception as polygon_error:
+                                    logger.debug(f"Polygon.io marketcap failed for {ticker}: {polygon_error}")
+
+                                # Fallback to yfinance if Polygon.io failed
+                                if marketcap_value is None:
+                                    try:
+                                        import yfinance as yf
+                                        yf_ticker = yf.Ticker(ticker)
+                                        marketcap_value = yf_ticker.info.get('marketCap', None)
+                                        if marketcap_value:
+                                            logger.info(f"Added yfinance marketcap {marketcap_value:,} to {len(df)} records for {ticker}")
+                                    except Exception as yf_error:
+                                        logger.warning(f"Both Polygon.io and yfinance marketcap failed for {ticker}: {yf_error}")
+
+                                df[col] = marketcap_value
+                            else:
+                                df[col] = None
+                    all_data[i] = df
 
                 # Concatenate all data
                 combined_df = pd.concat(all_data, ignore_index=True)
@@ -865,73 +1011,184 @@ class DataIngestion:
         """
         operation_name = "fetch_fred_data"
         
-        with self.performance_monitor.monitor_operation(operation_name):
-            try:
-                api_key = get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyaca7fcwmhm3y6pjqoe5arj47tcvpvidiniodv2p7d2xcq")
-                if not api_key:
-                    logger.error("FRED API key not found")
-                    return pd.DataFrame()
-                
-                # Rate limiting
-                self.rate_limiter.wait_if_needed()
-                
-                fred = Fred(api_key=api_key)
-                
-                # Define macroeconomic series with validation
-                series_list = [
-                    "FEDFUNDS",  # Federal Funds Rate
-                    "CPIAUCSL",  # Consumer Price Index
-                    "UNRATE",    # Unemployment Rate
-                    "GDP",       # Gross Domestic Product
-                    "GS10"       # 10-Year Treasury Rate
-                ]
-                
-                all_data = []
-                
-                for series_id in series_list:
-                    try:
-                        # Rate limiting for each series
-                        self.rate_limiter.wait_if_needed()
-                        
-                        logger.info(f"Fetching FRED data for series: {series_id}")
-                        
-                        # Fetch data with date range
-                        data = fred.get_series(
-                            series_id,
-                            observation_start=self.start_date.strftime("%Y-%m-%d"),
-                            observation_end=self.end_date.strftime("%Y-%m-%d")
-                        )
-                        
-                        if not data.empty:
-                            # Convert to DataFrame format
-                            df = pd.DataFrame({
-                                'date': data.index,
-                                'series_id': series_id,
-                                'value': data.values
-                            })
-                            
-                            # Data quality validation
-                            quality_passed, quality_score, issues = self.quality_validator.validate_ohlcv_data(
-                                df.rename(columns={'value': 'close'})  # Use close for validation
-                            )
-                            
-                            if quality_passed:
-                                all_data.append(df)
-                            else:
-                                logger.warning(f"Quality validation failed for series {series_id}: {issues}")
-                        
-                    except Exception as e:
-                        logger.error(f"Error fetching FRED data for series {series_id}: {str(e)}")
-                
-                if all_data:
-                    return pd.concat(all_data, ignore_index=True)
-                else:
-                    return pd.DataFrame()
-                    
-            except Exception as e:
-                logger.error(f"Error in fetch_fred_data: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
+        try:
+            # Try to get FRED API key from environment variable first
+            api_key = os.getenv('FRED_API_KEY')
+            if not api_key:
+                # Fallback to vault if available
+                try:
+                    api_key = get_secret("ocid1.vaultsecret.oc1.iad.amaaaaaacwmkemyawwc75zpuccl4qzs5qewxaauzwjfpxmsjmhu5umoij2oa")
+                except Exception as e:
+                    logger.warning(f"Could not get API key from vault: {e}")
+
+            if not api_key:
+                logger.error("FRED API key not found. Set FRED_API_KEY environment variable.")
                 return pd.DataFrame()
+
+            # Rate limiting
+            self.rate_limiter.wait_if_needed()
+
+            fred = Fred(api_key=api_key)
+
+            # Define comprehensive macroeconomic series for historical analysis (since 2000)
+            series_list = [
+                # Interest Rates & Monetary Policy
+                "FEDFUNDS",    # Federal Funds Rate
+                "GS10",        # 10-Year Treasury Rate
+                "GS2",         # 2-Year Treasury Rate
+                "GS5",         # 5-Year Treasury Rate
+                "TB3MS",       # 3-Month Treasury Bill
+
+                # Inflation & Prices
+                "CPIAUCSL",    # Consumer Price Index
+                "CPILFESL",    # Core CPI (ex food & energy)
+                "PCEPI",       # PCE Price Index
+                "PCEPILFE",    # Core PCE Price Index
+
+                # Employment & Labor
+                "UNRATE",      # Unemployment Rate
+                "PAYEMS",      # Nonfarm Payrolls
+                "CIVPART",     # Labor Force Participation Rate
+                "EMRATIO",     # Employment-Population Ratio
+
+                # Economic Output & Growth
+                "GDP",         # Gross Domestic Product
+                "GDPC1",       # Real GDP
+                "INDPRO",      # Industrial Production Index
+                "HOUST",       # Housing Starts
+
+                # Financial Markets & Credit
+                "DEXUSEU",     # USD/EUR Exchange Rate
+                "DEXJPUS",     # JPY/USD Exchange Rate
+                "DEXCHUS",     # CNY/USD Exchange Rate
+                "BAMLH0A0HYM2", # High Yield Credit Spread
+
+                # Economic Indicators
+                "USREC",       # US Recession Indicator
+                "UMCSENT",     # Consumer Sentiment
+                "PERMIT",      # Building Permits
+                "RETAILSL",    # Retail Sales
+            ]
+
+            all_data = []
+
+            for series_id in series_list:
+                try:
+                    # Rate limiting for each series
+                    self.rate_limiter.wait_if_needed()
+
+                    logger.info(f"Fetching FRED data for series: {series_id}")
+
+                    # First, get series metadata (including units)
+                    try:
+                        series_info = fred.get_series_info(series_id)
+                        units = series_info.get('units', 'Unknown')
+                        title = series_info.get('title', series_id)
+
+                    except Exception as e:
+                        print(f"Could not get series info for {series_id}: {e}")
+                        units = 'Unknown'
+                        title = series_id
+
+                    # Fetch data with date range
+                    data = fred.get_series(
+                        series_id,
+                        observation_start=self.start_date.strftime("%Y-%m-%d"),
+                        observation_end=self.end_date.strftime("%Y-%m-%d")
+                    )
+
+                    if not data.empty:
+                        # Convert to DataFrame format
+                        df = pd.DataFrame({
+                            'date': data.index,
+                            'series_id': series_id,
+                            'value': data.values,
+                            'units': units,
+                            'title': title
+                        })
+
+                        df["date"] = pd.to_datetime(df["date"])
+
+                        # Apply forward and backward filling for missing values
+                        df = self._apply_macro_data_filling(df, series_id)
+
+                        # Data quality validation for macro data
+                        quality_passed, quality_score, issues = self.quality_validator.validate_macro_data(df)
+
+                        if quality_passed:
+                            all_data.append(df)
+                        else:
+                            logger.warning(f"Quality validation failed for series {series_id}: {issues}")
+
+                except Exception as e:
+                    logger.error(f"Error fetching FRED data for series {series_id}: {str(e)}")
+                
+            if all_data:
+                return pd.concat(all_data, ignore_index=True)
+            else:
+                return pd.DataFrame()
+
+        except Exception as e:
+            logger.error(f"Error in fetch_fred_data: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return pd.DataFrame()
+
+    def _apply_macro_data_filling(self, df: pd.DataFrame, series_id: str) -> pd.DataFrame:
+        """
+        Apply forward and backward filling for missing values in macro data.
+
+        Args:
+            df: DataFrame with macro data
+            series_id: FRED series identifier
+
+        Returns:
+            pd.DataFrame: DataFrame with filled missing values
+        """
+        try:
+            logger = get_ingestion_logger(__name__)
+            original_missing = df['value'].isna().sum()
+
+            if original_missing > 0:
+                logger.info(f"Filling {original_missing} missing values for series {series_id}")
+
+                # Sort by date to ensure proper filling
+                df = df.sort_values('date').copy()
+
+                # Apply forward fill first (carry last observation forward)
+                if self.config.enable_forward_fill:
+                    df['value'] = df['value'].ffill()
+                    logger.info(f"Applied forward fill for series {series_id}")
+
+                # Apply backward fill for any remaining missing values at the beginning
+                if self.config.enable_backward_fill:
+                    df['value'] = df['value'].bfill()
+                    logger.info(f"Applied backward fill for series {series_id}")
+
+                # For any still missing values, use interpolation
+                if self.config.enable_interpolation and df['value'].isna().any():
+                    df['value'] = df['value'].interpolate(method='linear')
+                    logger.info(f"Applied linear interpolation for series {series_id}")
+
+                # Final fallback: fill with series median (for edge cases)
+                if df['value'].isna().any():
+                    median_value = df['value'].median()
+                    df['value'] = df['value'].fillna(median_value)
+                    logger.warning(f"Used median filling for series {series_id}: {median_value}")
+
+                final_missing = df['value'].isna().sum()
+                filled_count = original_missing - final_missing
+
+                logger.info(f"Successfully filled {filled_count} missing values for series {series_id}")
+
+                if final_missing > 0:
+                    logger.warning(f"Still have {final_missing} missing values for series {series_id}")
+
+            return df
+
+        except Exception as e:
+            logger = get_ingestion_logger(__name__)
+            logger.error(f"Error filling missing values for series {series_id}: {e}")
+            return df  # Return original data if filling fails
 
     def get_performance_metrics(self) -> Dict[str, Any]:
         """
